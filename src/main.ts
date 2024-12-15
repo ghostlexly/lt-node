@@ -13,11 +13,41 @@ interface CacheConfig {
 class LtNode {
   private cacheDir: string;
   private sourceDir: string;
+  private tsconfig: any;
 
   constructor(config: CacheConfig) {
     this.cacheDir = config.cacheDir;
     this.sourceDir = config.sourceDir;
+    this.tsconfig = this.loadTsConfig();
     this.ensureCacheDir();
+  }
+
+  private loadTsConfig() {
+    const tsconfigPath = path.join(this.sourceDir, "tsconfig.json");
+    if (fs.existsSync(tsconfigPath)) {
+      return require(tsconfigPath);
+    }
+    return null;
+  }
+
+  private getTsConfigAliases() {
+    if (!this.tsconfig?.compilerOptions?.paths) {
+      return {};
+    }
+
+    const aliases: { [key: string]: string } = {};
+    const paths = this.tsconfig.compilerOptions.paths;
+    const baseUrl = this.tsconfig.compilerOptions.baseUrl || ".";
+
+    for (const [alias, values] of Object.entries(paths)) {
+      const value = (values as string[])[0];
+      // Remove wildcard and convert to proper format
+      const cleanAlias = alias.replace("/*", "");
+      const cleanValue = value.replace("/*", "");
+      aliases[cleanAlias] = path.join(this.sourceDir, baseUrl, cleanValue);
+    }
+
+    return aliases;
   }
 
   private ensureCacheDir() {
@@ -27,14 +57,14 @@ class LtNode {
   }
 
   private async buildProject(): Promise<void> {
-    // Find all TypeScript files in the source directory
     const tsFiles = glob.sync("**/*.ts", {
       cwd: this.sourceDir,
       ignore: ["node_modules/**", this.cacheDir + "/**"],
       absolute: true,
     });
 
-    // Transform all files
+    const aliases = this.getTsConfigAliases();
+
     await esbuild.build({
       entryPoints: tsFiles,
       bundle: false,
@@ -44,8 +74,10 @@ class LtNode {
       sourcemap: true,
       outdir: this.cacheDir,
       write: true,
-      // Preserve directory structure
       outbase: this.sourceDir,
+      alias: aliases,
+      tsconfig: path.join(this.sourceDir, "tsconfig.json"),
+      resolveExtensions: [".ts", ".js", ".json"],
     });
   }
 
@@ -103,6 +135,8 @@ class LtNode {
   }
 
   public async watch(entryPoint: string): Promise<void> {
+    const aliases = this.getTsConfigAliases();
+
     const ctx = await esbuild.context({
       entryPoints: [entryPoint],
       bundle: false,
@@ -112,6 +146,9 @@ class LtNode {
       sourcemap: true,
       outdir: this.cacheDir,
       outbase: this.sourceDir,
+      alias: aliases,
+      tsconfig: path.join(this.sourceDir, "tsconfig.json"),
+      resolveExtensions: [".ts", ".js", ".json"],
     });
 
     await ctx.watch();
