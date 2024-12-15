@@ -34,24 +34,15 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LtNode = void 0;
-const esbuild = __importStar(require("esbuild"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const glob_1 = require("glob");
-const get_tsconfig_1 = require("get-tsconfig");
+const ts = __importStar(require("typescript"));
 class LtNode {
     cacheDir;
     sourceDir;
-    tsconfig;
-    pathsMatcher;
     constructor(options = {}) {
         this.sourceDir = process.cwd();
         this.cacheDir = options.cacheDir || path.join(this.sourceDir, ".ts-cache");
-        this.tsconfig = (0, get_tsconfig_1.getTsconfig)(this.sourceDir);
-        if (!this.tsconfig) {
-            throw new Error("No tsconfig.json found");
-        }
-        this.pathsMatcher = (0, get_tsconfig_1.createPathsMatcher)(this.tsconfig);
         this.ensureCacheDir();
     }
     ensureCacheDir() {
@@ -60,47 +51,42 @@ class LtNode {
         }
     }
     async buildProject() {
-        const tsFiles = await (0, glob_1.glob)("**/*.{ts,tsx}", {
-            cwd: this.sourceDir,
-            ignore: ["node_modules/**", this.cacheDir + "/**"],
-            absolute: true,
+        const configPath = path.join(process.cwd(), "tsconfig.json");
+        const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+        const parsedCommandLine = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
+            ...ts.sys,
+            onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+                throw new Error(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+            },
         });
-        const { baseUrl = ".", paths = {} } = this.tsconfig?.config.compilerOptions || {};
-        await Promise.all(tsFiles.map(async (file) => {
-            const source = await fs.promises.readFile(file, "utf8");
-            const relativePath = path.relative(this.sourceDir, file);
-            const outPath = path.join(this.cacheDir, relativePath.replace(/\.tsx?$/, ".js"));
-            await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
-            const result = await esbuild.transform(source, {
-                loader: file.endsWith(".tsx") ? "tsx" : "ts",
-                format: "cjs",
-                target: "node16",
-                sourcemap: true,
-                sourcefile: file,
-                tsconfigRaw: {
-                    compilerOptions: {
-                        baseUrl: path.join(this.sourceDir, baseUrl),
-                        paths,
-                    },
-                },
-            });
-            let processedCode = result.code;
-            processedCode = processedCode.replace(/require\(['"]([^'"]+)['"]\)/g, (match, importPath) => {
-                if (!this.pathsMatcher) {
-                    return match;
-                }
-                const matchedPath = this.pathsMatcher(importPath);
-                if (matchedPath) {
-                    const resolvedPath = path.relative(path.dirname(outPath), path.join(this.sourceDir, matchedPath[0]));
-                    return `require('${resolvedPath}')`;
-                }
-                return match;
-            });
-            await fs.promises.writeFile(outPath, processedCode);
-            if (result.map) {
-                await fs.promises.writeFile(outPath + ".map", result.map);
-            }
-        }));
+        if (!parsedCommandLine) {
+            throw new Error(`Failed to parse tsconfig at ${configPath}`);
+        }
+        const compilerOptions = {
+            ...parsedCommandLine.options,
+            outDir: this.cacheDir,
+            noEmit: false,
+            emitDeclarationOnly: false,
+        };
+        const program = ts.createProgram(parsedCommandLine.fileNames, compilerOptions);
+        const diagnostics = ts.getPreEmitDiagnostics(program);
+        if (diagnostics.length > 0) {
+            console.error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+                getCurrentDirectory: () => process.cwd(),
+                getCanonicalFileName: (fileName) => fileName,
+                getNewLine: () => ts.sys.newLine,
+            }));
+            throw new Error("TypeScript compilation failed");
+        }
+        const emitResult = program.emit();
+        if (emitResult.diagnostics.length > 0) {
+            console.error(ts.formatDiagnosticsWithColorAndContext(emitResult.diagnostics, {
+                getCurrentDirectory: () => process.cwd(),
+                getCanonicalFileName: (fileName) => fileName,
+                getNewLine: () => ts.sys.newLine,
+            }));
+            throw new Error("TypeScript emission failed");
+        }
     }
     async run(entryPoint) {
         await this.buildProject();

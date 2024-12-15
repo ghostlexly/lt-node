@@ -28,7 +28,6 @@
   "description": "⚡️ Lightning-fast TypeScript execution in Node.js with zero configuration required. Seamlessly run TypeScript files in both development and production environments using the power of esbuild.",
   "dependencies": {
     "@types/node": "^22.10.2",
-    "esbuild": "^0.24.0",
     "get-tsconfig": "^4.8.1",
     "glob": "^11.0.0"
   },
