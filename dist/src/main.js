@@ -37,13 +37,21 @@ exports.LtNode = void 0;
 const esbuild = __importStar(require("esbuild"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
-const crypto_1 = require("crypto");
+const glob_1 = require("glob");
+const get_tsconfig_1 = require("get-tsconfig");
 class LtNode {
     cacheDir;
     sourceDir;
-    constructor(config) {
-        this.cacheDir = config.cacheDir;
-        this.sourceDir = config.sourceDir;
+    tsconfig;
+    pathsMatcher;
+    constructor(options = {}) {
+        this.sourceDir = process.cwd();
+        this.cacheDir = options.cacheDir || path.join(this.sourceDir, ".ts-cache");
+        this.tsconfig = (0, get_tsconfig_1.getTsconfig)(this.sourceDir);
+        if (!this.tsconfig) {
+            throw new Error("No tsconfig.json found");
+        }
+        this.pathsMatcher = (0, get_tsconfig_1.createPathsMatcher)(this.tsconfig);
         this.ensureCacheDir();
     }
     ensureCacheDir() {
@@ -51,69 +59,57 @@ class LtNode {
             fs.mkdirSync(this.cacheDir, { recursive: true });
         }
     }
-    getCacheFilePath(sourcePath) {
-        const relativePath = path.relative(this.sourceDir, sourcePath);
-        const hash = (0, crypto_1.createHash)("md5").update(relativePath).digest("hex");
-        return path.join(this.cacheDir, `${hash}.js`);
-    }
-    async transformAndCache(sourcePath) {
-        const cacheFilePath = this.getCacheFilePath(sourcePath);
-        if (fs.existsSync(cacheFilePath)) {
-            const sourceStats = fs.statSync(sourcePath);
-            const cacheStats = fs.statSync(cacheFilePath);
-            if (cacheStats.mtime > sourceStats.mtime) {
-                return cacheFilePath;
-            }
-        }
-        const result = await esbuild.build({
-            entryPoints: [sourcePath],
-            bundle: false,
-            format: "cjs",
-            platform: "node",
-            target: "node14",
-            sourcemap: true,
-            outfile: cacheFilePath,
-            write: true,
+    async buildProject() {
+        const tsFiles = await (0, glob_1.glob)("**/*.{ts,tsx}", {
+            cwd: this.sourceDir,
+            ignore: ["node_modules/**", this.cacheDir + "/**"],
+            absolute: true,
         });
-        return cacheFilePath;
-    }
-    async require(modulePath) {
-        const absolutePath = path.resolve(modulePath);
-        const cachedPath = await this.transformAndCache(absolutePath);
-        return require(cachedPath);
+        const { baseUrl = ".", paths = {} } = this.tsconfig?.config.compilerOptions || {};
+        await Promise.all(tsFiles.map(async (file) => {
+            const source = await fs.promises.readFile(file, "utf8");
+            const relativePath = path.relative(this.sourceDir, file);
+            const outPath = path.join(this.cacheDir, relativePath.replace(/\.tsx?$/, ".js"));
+            await fs.promises.mkdir(path.dirname(outPath), { recursive: true });
+            const result = await esbuild.transform(source, {
+                loader: file.endsWith(".tsx") ? "tsx" : "ts",
+                format: "cjs",
+                target: "node16",
+                sourcemap: true,
+                sourcefile: file,
+                tsconfigRaw: {
+                    compilerOptions: {
+                        baseUrl: path.join(this.sourceDir, baseUrl),
+                        paths,
+                    },
+                },
+            });
+            let processedCode = result.code;
+            processedCode = processedCode.replace(/require\(['"]([^'"]+)['"]\)/g, (match, importPath) => {
+                if (!this.pathsMatcher) {
+                    return match;
+                }
+                const matchedPath = this.pathsMatcher(importPath);
+                if (matchedPath) {
+                    const resolvedPath = path.relative(path.dirname(outPath), path.join(this.sourceDir, matchedPath[0]));
+                    return `require('${resolvedPath}')`;
+                }
+                return match;
+            });
+            await fs.promises.writeFile(outPath, processedCode);
+            if (result.map) {
+                await fs.promises.writeFile(outPath + ".map", result.map);
+            }
+        }));
     }
     async run(entryPoint) {
-        const absolutePath = path.resolve(entryPoint);
-        const cachedPath = await this.transformAndCache(absolutePath);
-        require(cachedPath);
-    }
-    async watch(entryPoint) {
-        const ctx = await esbuild.context({
-            entryPoints: [entryPoint],
-            bundle: false,
-            format: "cjs",
-            platform: "node",
-            target: "node14",
-            sourcemap: true,
-            outdir: this.cacheDir,
-        });
-        await ctx.watch();
-        console.log("Watching for changes...");
+        await this.buildProject();
+        const relativePath = path.relative(this.sourceDir, path.resolve(entryPoint));
+        const compiledPath = path.join(this.cacheDir, relativePath.replace(/\.tsx?$/, ".js"));
+        if (!fs.existsSync(compiledPath)) {
+            throw new Error(`Compiled file not found: ${compiledPath}`);
+        }
     }
 }
 exports.LtNode = LtNode;
-require.extensions[".ts"] = function (module, filename) {
-    const runner = new LtNode({
-        cacheDir: path.join(process.cwd(), ".ts-cache"),
-        sourceDir: process.cwd(),
-    });
-    runner
-        .require(filename)
-        .then((exports) => {
-        module.exports = exports;
-    })
-        .catch((error) => {
-        throw error;
-    });
-};
 //# sourceMappingURL=main.js.map

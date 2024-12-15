@@ -29,6 +29,7 @@
   "dependencies": {
     "@types/node": "^22.10.2",
     "esbuild": "^0.24.0",
+    "get-tsconfig": "^4.8.1",
     "glob": "^11.0.0"
   },
   "devDependencies": {
