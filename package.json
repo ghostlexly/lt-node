@@ -1,7 +1,13 @@
 {
   "name": "lt-node",
   "version": "1.0.0",
-  "main": "index.js",
+  "bin": {
+    "lt-node": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc"
   },
