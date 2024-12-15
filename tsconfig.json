@@ -16,7 +16,8 @@
     "strictNullChecks": true, // allow null checks for Zod infers to work
     "noImplicitAny": false, // allow any type
     "strictBindCallApply": false, // allow bind, call and apply to work
-    "esModuleInterop": true // allow import es modules
+    "esModuleInterop": true, // allow import es modules
+    "allowJs": true // allow .js files
   },
   "include": ["src/**/*", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]
