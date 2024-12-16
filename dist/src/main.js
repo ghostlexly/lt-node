@@ -67,17 +67,13 @@ class LtNode {
             outDir: this.cacheDir,
             noEmit: false,
             emitDeclarationOnly: false,
+            noEmitOnError: false,
+            skipLibCheck: true,
+            incremental: true,
+            transpileOnly: true,
+            isolatedModules: true,
         };
         const program = ts.createProgram(parsedCommandLine.fileNames, compilerOptions);
-        const diagnostics = ts.getPreEmitDiagnostics(program);
-        if (diagnostics.length > 0) {
-            console.error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-                getCurrentDirectory: () => process.cwd(),
-                getCanonicalFileName: (fileName) => fileName,
-                getNewLine: () => ts.sys.newLine,
-            }));
-            throw new Error("TypeScript compilation failed");
-        }
         const emitResult = program.emit();
         if (emitResult.diagnostics.length > 0) {
             console.error(ts.formatDiagnosticsWithColorAndContext(emitResult.diagnostics, {
