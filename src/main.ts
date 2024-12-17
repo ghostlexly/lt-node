@@ -74,7 +74,7 @@ export class LtNode {
       }
 
       // Override outDir to use cache directory
-      const compilerOptions = {
+      const compilerOptions: ts.CompilerOptions = {
         ...parsedCommandLine.options,
         outDir: outputDir, // Set output directory to my cache/output directory
         noCheck: true, // Disable type checking
