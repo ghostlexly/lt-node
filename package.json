@@ -29,7 +29,8 @@
   "dependencies": {
     "@types/node": "^22.10.2",
     "get-tsconfig": "^4.8.1",
-    "glob": "^11.0.0"
+    "glob": "^11.0.0",
+    "tmp": "^0.2.3"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

@@ -3,6 +3,8 @@ import * as fs from "fs";
 import { glob } from "glob";
 import { getTsconfig } from "get-tsconfig";
 import * as ts from "typescript";
+import * as os from "os";
+import * as tmp from "tmp";
 
 interface NodeOptions {
   cacheDir?: string;
@@ -60,24 +62,30 @@ export class LtNode {
       isolatedModules: true,
     };
 
-    // Create program with all root files from tsconfig
-    const program = ts.createProgram(
-      parsedCommandLine.fileNames,
-      compilerOptions
-    );
+    // Create temporary directory for modified files
+    const tempDir = tmp.dirSync({ unsafeCleanup: true }).name;
 
-    // Get diagnostics
-    // const diagnostics = ts.getPreEmitDiagnostics(program);
-    // if (diagnostics.length > 0) {
-    //   console.error(
-    //     ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-    //       getCurrentDirectory: () => process.cwd(),
-    //       getCanonicalFileName: (fileName) => fileName,
-    //       getNewLine: () => ts.sys.newLine,
-    //     })
-    //   );
-    //   throw new Error("TypeScript compilation failed");
-    // }
+    // Copy files to temporary directory with `// @ts-nocheck`
+    const tempFileNames = parsedCommandLine.fileNames.map((fileName) => {
+      const content = fs.readFileSync(fileName, "utf8");
+      const tempFileName = path.join(
+        tempDir,
+        path.relative(this.sourceDir, fileName)
+      );
+      const tempFileDir = path.dirname(tempFileName);
+
+      if (!fs.existsSync(tempFileDir)) {
+        fs.mkdirSync(tempFileDir, { recursive: true });
+      }
+
+      fs.writeFileSync(tempFileName, `// @ts-nocheck\n${content}`);
+      return tempFileName;
+    });
+
+    // Create program with temporary files
+    const program = ts.createProgram(tempFileNames, {
+      ...compilerOptions,
+    });
 
     // Emit all files
     const emitResult = program.emit();
@@ -92,6 +100,9 @@ export class LtNode {
       );
       throw new Error("TypeScript emission failed");
     }
+
+    // Cleanup temporary directory
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
   public async run(entryPoint: string): Promise<void> {
