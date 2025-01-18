@@ -7,6 +7,7 @@ exports.LtNode = void 0;
 const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
 const fs_1 = require("fs");
+const glob_1 = require("glob");
 const typescript_1 = __importDefault(require("typescript"));
 const core_1 = require("@swc/core");
 const child_process_1 = require("child_process");
@@ -75,9 +76,9 @@ class LtNode {
     async buildProjectWithSwc() {
         const { options: tsOptions, fileNames } = this.parsedTsConfig;
         const outputDir = await this.getOutputDir();
+        const rootDir = tsOptions.rootDir ?? process.cwd();
         const swcTarget = this.mapTarget(tsOptions.target ?? typescript_1.default.ScriptTarget.ES2022);
         const swcModule = this.mapModuleKind(tsOptions.module ?? typescript_1.default.ModuleKind.ESNext);
-        const rootDir = tsOptions.rootDir ?? process.cwd();
         for (const tsFile of fileNames) {
             const relPath = path_1.default.relative(rootDir, tsFile);
             const outFile = path_1.default.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
@@ -127,6 +128,22 @@ class LtNode {
         }
         return true;
     }
+    async copyNonTsFiles() {
+        const { options: tsOptions } = this.parsedTsConfig;
+        const outputDir = await this.getOutputDir();
+        const rootDir = tsOptions.rootDir ?? process.cwd();
+        const nonTsFiles = await (0, glob_1.glob)("**/*", {
+            ignore: ["**/*.{ts,tsx,js,jsx}", "**/node_modules/**", outputDir + "/**"],
+            nodir: true,
+            cwd: rootDir,
+        });
+        for (const file of nonTsFiles) {
+            const sourcePath = path_1.default.join(rootDir, file);
+            const destPath = path_1.default.join(outputDir, file);
+            await promises_1.default.mkdir(path_1.default.dirname(destPath), { recursive: true });
+            await promises_1.default.copyFile(sourcePath, destPath);
+        }
+    }
     async getArgs({ entryPoint }) {
         const entryPointIndex = process.argv.indexOf(entryPoint);
         const allArgs = process.argv.slice(entryPointIndex + 1);
@@ -168,7 +185,7 @@ class LtNode {
         });
     }
     async buildAndRun({ entryPoint }) {
-        await this.buildProjectWithSwc();
+        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
         await this.runNodeJs({
             entryPoint,
         });

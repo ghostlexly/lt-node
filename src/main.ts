@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs/promises";
 import { existsSync } from "fs";
+import { glob } from "glob";
 import ts from "typescript";
 import { JscTarget, transformFile } from "@swc/core";
 import { spawn } from "child_process";
@@ -93,6 +94,9 @@ export class LtNode {
     const { options: tsOptions, fileNames } = this.parsedTsConfig;
     const outputDir = await this.getOutputDir();
 
+    // If there's a rootDir set, we can replicate the relative path structure in outDir
+    const rootDir = tsOptions.rootDir ?? process.cwd();
+
     // Map TS options to SWC equivalents
     const swcTarget = this.mapTarget(
       tsOptions.target ?? ts.ScriptTarget.ES2022
@@ -100,9 +104,6 @@ export class LtNode {
     const swcModule = this.mapModuleKind(
       tsOptions.module ?? ts.ModuleKind.ESNext
     );
-
-    // If there's a rootDir set, we can replicate the relative path structure in outDir
-    const rootDir = tsOptions.rootDir ?? process.cwd();
 
     // Transpile each file using SWC
     for (const tsFile of fileNames) {
@@ -179,6 +180,29 @@ export class LtNode {
     return true;
   }
 
+  public async copyNonTsFiles() {
+    const { options: tsOptions } = this.parsedTsConfig;
+    const outputDir = await this.getOutputDir();
+    const rootDir = tsOptions.rootDir ?? process.cwd();
+
+    const nonTsFiles = await glob("**/*", {
+      ignore: ["**/*.{ts,tsx,js,jsx}", "**/node_modules/**", outputDir + "/**"],
+      nodir: true,
+      cwd: rootDir,
+    });
+
+    for (const file of nonTsFiles) {
+      const sourcePath = path.join(rootDir, file);
+      const destPath = path.join(outputDir, file);
+
+      // Ensure the destination directory exists
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+
+      // Copy the file
+      await fs.copyFile(sourcePath, destPath);
+    }
+  }
+
   /**
    * Get the arguments and separate node args from script args, so we can pass them to the child process.
    */
@@ -247,8 +271,8 @@ export class LtNode {
    * Build the project with SWC and run the transpiled entry point.
    */
   public async buildAndRun({ entryPoint }: { entryPoint: string }) {
-    // Build the project with SWC
-    await this.buildProjectWithSwc();
+    // Build the project with SWC and copy non-ts files to the output dir
+    await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
 
     // Run the transpiled entry point
     await this.runNodeJs({
