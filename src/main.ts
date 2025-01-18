@@ -263,10 +263,12 @@ export class LtNode {
 
         this.currentNodeProcess.on("close", () => {
           this.currentNodeProcess = null;
-          resolve(true);
+
+          // Add small delay to ensure port is released
+          setTimeout(resolve, 100);
         });
 
-        this.currentNodeProcess.kill("SIGTERM");
+        this.currentNodeProcess.kill("SIGKILL");
       });
     } catch (error) {
       this.currentNodeProcess?.kill("SIGKILL");
