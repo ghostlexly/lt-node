@@ -33,7 +33,7 @@ lt-node src/main.ts
 ### Arguments
 
 - `--watch`: Watch for file changes and automatically recompile and rerun the TypeScript files.
-- `--noCheck`: Skip type checking, only compile and run the TypeScript files for faster execution.
+- `--noCheck`: Skip type checking, only compile and run the TypeScript files.
 
 ## Comparison with Other TypeScript Runtimes
 
