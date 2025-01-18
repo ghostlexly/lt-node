@@ -336,6 +336,14 @@ export class LtNode {
     }
   }
 
+  private debounce(func: Function, wait: number) {
+    let timeout: NodeJS.Timeout;
+    return (...args: any[]) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+  }
+
   private async watchFiles(entryPoint: string) {
     const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
     const outputDir = await this.getOutputDir();
@@ -378,14 +386,16 @@ export class LtNode {
       ignoreInitial: true,
     });
 
-    watcher.on("change", async (filename) => {
+    const debouncedBuildAndRun = this.debounce(async (filename: string) => {
       logger.log({
         type: "info",
         message: `File changed: ${chalk.yellow(filename)}. Rebuilding...`,
       });
 
       await this.buildAndRun(entryPoint);
-    });
+    }, 300); // Adjust the debounce delay as needed
+
+    watcher.on("change", debouncedBuildAndRun);
 
     // Clean up watcher on exit
     process.on("SIGINT", () => {
