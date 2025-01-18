@@ -253,6 +253,28 @@ export class LtNode {
     return { execArgs, scriptArgs };
   };
 
+  private stopNodeProcess = async () => {
+    try {
+      await new Promise((resolve, reject) => {
+        if (!this.currentNodeProcess) {
+          resolve(true);
+          return;
+        }
+
+        this.currentNodeProcess.on("close", () => {
+          this.currentNodeProcess = null;
+          resolve(true);
+        });
+
+        this.currentNodeProcess.kill("SIGTERM");
+      });
+    } catch (error) {
+      this.currentNodeProcess?.kill("SIGKILL");
+      this.currentNodeProcess = null;
+      throw error;
+    }
+  };
+
   /**
    * Run the transpiled entry point with a new Node.js process.
    */
@@ -265,39 +287,43 @@ export class LtNode {
       path.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js")
     );
 
-    // If we're already running a process in watch mode, clean up listeners and kill the process
+    // If we're already running a process in watch mode, clean up the previous process
     if (this.currentNodeProcess) {
-      this.currentNodeProcess.kill();
+      await this.stopNodeProcess();
     }
-
-    // Create a new Node.js process with the arguments
-    const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
-    this.currentNodeProcess = spawn(
-      "node",
-      [...execArgs, entryJs, ...scriptArgs],
-      {
-        stdio: "inherit",
-        env: process.env,
-      }
-    );
 
     // Handle the process exit
     return new Promise((resolve, reject) => {
-      this.currentNodeProcess!.on("exit", (code) => {
-        if (!this.isWatching) {
+      // Create a new Node.js process with the arguments
+      const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
+
+      // Filter out lt-node args from execArgs
+      const filteredExecArgs = execArgs.filter(
+        (arg) => arg !== "--watch" && arg !== "--noCheck"
+      );
+
+      this.currentNodeProcess = spawn(
+        "node",
+        [...filteredExecArgs, entryJs, ...scriptArgs],
+        {
+          stdio: "inherit",
+          env: process.env,
+        }
+      );
+
+      if (!this.isWatching) {
+        this.currentNodeProcess.on("exit", (code) => {
           if (code === 0 || code === null) {
             resolve(true);
           } else {
             reject(new Error(`Process exited with code ${code}`));
           }
-        }
-      });
+        });
 
-      this.currentNodeProcess!.on("error", (err) => {
-        if (!this.isWatching) {
+        this.currentNodeProcess.on("error", (err) => {
           reject(err);
-        }
-      });
+        });
+      }
     });
   };
 
@@ -343,30 +369,31 @@ export class LtNode {
     const watcher = chokidar.watch(rootDir, {
       ignored: (watchPath, stats) => {
         // Ignore node_modules
-        // if (watchPath.includes(path.join(rootDir, "node_modules"))) {
-        //   return true;
-        // }
+        if (watchPath.includes(path.join(rootDir, "node_modules"))) {
+          return true;
+        }
 
         // Ignore .git
-        // if (watchPath.includes(path.join(rootDir, ".git"))) {
-        //   return true;
-        // }
+        if (watchPath.includes(path.join(rootDir, ".git"))) {
+          return true;
+        }
 
         // Ignore the output directory
         if (watchPath.includes(outputDir)) {
           return true;
         }
 
-        // if (
-        //   stats?.isFile() &&
-        //   !watchPath.endsWith(".ts") &&
-        //   !watchPath.endsWith(".tsx") &&
-        //   !watchPath.endsWith(".js") &&
-        //   !watchPath.endsWith(".jsx") &&
-        //   !watchPath.endsWith(".json")
-        // ) {
-        //   return true;
-        // }
+        // Ignore non-ts files
+        if (
+          stats?.isFile() &&
+          !watchPath.endsWith(".ts") &&
+          !watchPath.endsWith(".tsx") &&
+          !watchPath.endsWith(".js") &&
+          !watchPath.endsWith(".jsx") &&
+          !watchPath.endsWith(".json")
+        ) {
+          return true;
+        }
 
         return false;
       },
@@ -385,11 +412,6 @@ export class LtNode {
       });
 
       await this.buildAndRun(entryPoint);
-    });
-
-    // Clean up watcher on exit
-    process.on("SIGINT", () => {
-      watcher.close();
     });
 
     logger.log({

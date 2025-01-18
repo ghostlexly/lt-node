@@ -189,13 +189,8 @@ class LtNode {
                     resolve(true);
                     return;
                 }
-                const timeout = setTimeout(() => {
-                    reject(new Error("Server shutdown timed out after 5000ms"));
-                }, 5000);
                 this.currentNodeProcess.on("close", () => {
-                    clearTimeout(timeout);
                     this.currentNodeProcess = null;
-                    console.log("Previous server process terminated");
                     resolve(true);
                 });
                 this.currentNodeProcess.kill("SIGTERM");
@@ -213,32 +208,32 @@ class LtNode {
         if (this.currentNodeProcess) {
             await this.stopNodeProcess();
         }
-        const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
-        this.currentNodeProcess = (0, child_process_1.spawn)("node", [...execArgs, entryJs, ...scriptArgs], {
-            stdio: "inherit",
-            env: process.env,
-        });
         return new Promise((resolve, reject) => {
-            this.currentNodeProcess.on("exit", (code) => {
-                if (!this.isWatching) {
+            const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
+            const filteredExecArgs = execArgs.filter((arg) => arg !== "--watch" && arg !== "--noCheck");
+            this.currentNodeProcess = (0, child_process_1.spawn)("node", [...filteredExecArgs, entryJs, ...scriptArgs], {
+                stdio: "inherit",
+                env: process.env,
+            });
+            if (!this.isWatching) {
+                this.currentNodeProcess.on("exit", (code) => {
                     if (code === 0 || code === null) {
                         resolve(true);
                     }
                     else {
                         reject(new Error(`Process exited with code ${code}`));
                     }
-                }
-            });
-            this.currentNodeProcess.on("error", (err) => {
-                if (!this.isWatching) {
+                });
+                this.currentNodeProcess.on("error", (err) => {
                     reject(err);
-                }
-            });
+                });
+            }
         });
     };
     buildAndRun = async (entryPoint) => {
         try {
             await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+            const runProcess = this.runNodeJs({ entryPoint });
             if (!this.isNoCheck) {
                 setTimeout(() => {
                     this.typeCheck().then((passed) => {
@@ -251,6 +246,7 @@ class LtNode {
                     });
                 }, 0);
             }
+            await runProcess;
         }
         catch (error) {
             logger_1.logger.log({
@@ -264,7 +260,21 @@ class LtNode {
         const outputDir = await this.getOutputDir();
         const watcher = chokidar_1.default.watch(rootDir, {
             ignored: (watchPath, stats) => {
+                if (watchPath.includes(path_1.default.join(rootDir, "node_modules"))) {
+                    return true;
+                }
+                if (watchPath.includes(path_1.default.join(rootDir, ".git"))) {
+                    return true;
+                }
                 if (watchPath.includes(outputDir)) {
+                    return true;
+                }
+                if (stats?.isFile() &&
+                    !watchPath.endsWith(".ts") &&
+                    !watchPath.endsWith(".tsx") &&
+                    !watchPath.endsWith(".js") &&
+                    !watchPath.endsWith(".jsx") &&
+                    !watchPath.endsWith(".json")) {
                     return true;
                 }
                 return false;
@@ -281,9 +291,6 @@ class LtNode {
             });
             await this.buildAndRun(entryPoint);
         });
-        process.on("SIGINT", () => {
-            watcher.close();
-        });
         logger_1.logger.log({
             type: "info",
             message: "Watching for file changes...",
@@ -297,6 +304,7 @@ class LtNode {
         if (this.isWatching) {
             this.watchFiles(entryPoint);
         }
+        await this.buildAndRun(entryPoint);
     };
 }
 exports.LtNode = LtNode;
