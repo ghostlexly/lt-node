@@ -139,11 +139,7 @@ class LtNode {
             }
         }
     }
-    async run(entryPoint) {
-        const parsedTsConfig = await this.getParsedCommandLine();
-        const tsOptions = parsedTsConfig.options;
-        const outputDir = await this.getOutputDir(tsOptions);
-        const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
+    async getArgs({ entryPoint }) {
         const entryPointIndex = process.argv.indexOf(entryPoint);
         const allArgs = process.argv.slice(entryPointIndex + 1);
         const execArgs = [];
@@ -156,9 +152,15 @@ class LtNode {
                 scriptArgs.push(arg);
             }
         });
+        return { execArgs, scriptArgs };
+    }
+    async run(entryPoint) {
+        const parsedTsConfig = await this.getParsedCommandLine();
+        const tsOptions = parsedTsConfig.options;
+        const outputDir = await this.getOutputDir(tsOptions);
+        const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
         await this.buildProjectWithSwc({ parsedTsConfig });
-        console.log("LT-Node", "node args:", execArgs);
-        console.log("LT-Node", "script args:", scriptArgs);
+        const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
         const { spawn } = await Promise.resolve().then(() => __importStar(require("child_process")));
         const nodeProcess = spawn("node", [...execArgs, entryJs, ...scriptArgs], {
             stdio: "inherit",

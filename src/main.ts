@@ -149,17 +149,7 @@ export class LtNode {
     }
   }
 
-  public async run(entryPoint: string): Promise<void> {
-    const parsedTsConfig = await this.getParsedCommandLine();
-    const tsOptions = parsedTsConfig.options;
-
-    // Get the output directory and resolve the transpiled entry point path
-    const outputDir = await this.getOutputDir(tsOptions);
-    const entryJs = path.join(
-      outputDir,
-      path.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js")
-    );
-
+  private async getArgs({ entryPoint }: { entryPoint: string }) {
     // Get the arguments and separate node args from script args
     const entryPointIndex = process.argv.indexOf(entryPoint);
     const allArgs = process.argv.slice(entryPointIndex + 1);
@@ -176,6 +166,20 @@ export class LtNode {
       }
     });
 
+    return { execArgs, scriptArgs };
+  }
+
+  public async run(entryPoint: string): Promise<void> {
+    const parsedTsConfig = await this.getParsedCommandLine();
+    const tsOptions = parsedTsConfig.options;
+
+    // Get the output directory and resolve the transpiled entry point path
+    const outputDir = await this.getOutputDir(tsOptions);
+    const entryJs = path.join(
+      outputDir,
+      path.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js")
+    );
+
     // (Optional) Type-check your code separately with "tsc --noEmit" if you want type safety.
     // For example:
     //   import { execSync } from "child_process";
@@ -185,6 +189,8 @@ export class LtNode {
     await this.buildProjectWithSwc({ parsedTsConfig });
 
     // Create a new Node.js process with the arguments
+    const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
+
     const { spawn } = await import("child_process");
     const nodeProcess = spawn("node", [...execArgs, entryJs, ...scriptArgs], {
       stdio: "inherit",
