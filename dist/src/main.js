@@ -107,26 +107,28 @@ class LtNode {
             }
         }
     }
-    async typeCheck() {
-        const program = typescript_1.default.createProgram({
-            rootNames: this.parsedTsConfig.fileNames,
-            options: this.parsedTsConfig.options,
+    typeCheck() {
+        return new Promise((resolve) => {
+            const program = typescript_1.default.createProgram({
+                rootNames: this.parsedTsConfig.fileNames,
+                options: this.parsedTsConfig.options,
+            });
+            const diagnostics = [
+                ...program.getSemanticDiagnostics(),
+                ...program.getSyntacticDiagnostics(),
+            ];
+            if (diagnostics.length > 0) {
+                const formatHost = {
+                    getCanonicalFileName: (path) => path,
+                    getCurrentDirectory: typescript_1.default.sys.getCurrentDirectory,
+                    getNewLine: () => typescript_1.default.sys.newLine,
+                };
+                const output = typescript_1.default.formatDiagnosticsWithColorAndContext(diagnostics, formatHost);
+                process.stderr.write(output);
+                resolve(false);
+            }
+            resolve(true);
         });
-        const diagnostics = [
-            ...program.getSemanticDiagnostics(),
-            ...program.getSyntacticDiagnostics(),
-        ];
-        if (diagnostics.length > 0) {
-            const formatHost = {
-                getCanonicalFileName: (path) => path,
-                getCurrentDirectory: typescript_1.default.sys.getCurrentDirectory,
-                getNewLine: () => typescript_1.default.sys.newLine,
-            };
-            const output = typescript_1.default.formatDiagnosticsWithColorAndContext(diagnostics, formatHost);
-            process.stderr.write(output);
-            return false;
-        }
-        return true;
     }
     async copyNonTsFiles() {
         const { options: tsOptions } = this.parsedTsConfig;
@@ -182,27 +184,28 @@ class LtNode {
             process.on("SIGINT", () => {
                 nodeProcess.kill();
             });
-        });
-    }
-    async buildAndRun({ entryPoint }) {
-        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
-        await this.runNodeJs({
-            entryPoint,
+            process.on("exit", () => {
+                nodeProcess.kill();
+            });
         });
     }
     async run(entryPoint) {
         await this.parseTsConfig();
-        await this.buildAndRun({ entryPoint });
+        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+        const runProcess = this.runNodeJs({ entryPoint });
         if (process.env.TYPE_CHECK !== "false") {
-            this.typeCheck().then((passed) => {
-                if (!passed) {
-                    helper_1.helper.log({
-                        type: "error",
-                        message: "Type-check failed - see errors above. Your code is still running.",
-                    });
-                }
-            });
+            setTimeout(() => {
+                this.typeCheck().then((passed) => {
+                    if (!passed) {
+                        helper_1.helper.log({
+                            type: "error",
+                            message: "Type-check failed - see errors above.",
+                        });
+                    }
+                });
+            }, 0);
         }
+        await runProcess;
     }
 }
 exports.LtNode = LtNode;

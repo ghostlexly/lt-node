@@ -151,33 +151,36 @@ export class LtNode {
   /**
    * Type-check the codebase using TypeScript compiler API
    */
-  public async typeCheck(): Promise<boolean> {
-    const program = ts.createProgram({
-      rootNames: this.parsedTsConfig.fileNames,
-      options: this.parsedTsConfig.options,
+  private typeCheck(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const program = ts.createProgram({
+        rootNames: this.parsedTsConfig.fileNames,
+        options: this.parsedTsConfig.options,
+      });
+
+      const diagnostics = [
+        ...program.getSemanticDiagnostics(),
+        ...program.getSyntacticDiagnostics(),
+      ];
+
+      if (diagnostics.length > 0) {
+        // Use TypeScript's built-in formatter
+        const formatHost: ts.FormatDiagnosticsHost = {
+          getCanonicalFileName: (path) => path,
+          getCurrentDirectory: ts.sys.getCurrentDirectory,
+          getNewLine: () => ts.sys.newLine,
+        };
+
+        const output = ts.formatDiagnosticsWithColorAndContext(
+          diagnostics,
+          formatHost
+        );
+        process.stderr.write(output);
+        resolve(false);
+      }
+
+      resolve(true);
     });
-
-    const diagnostics = [
-      ...program.getSemanticDiagnostics(),
-      ...program.getSyntacticDiagnostics(),
-    ];
-
-    if (diagnostics.length > 0) {
-      // Use TypeScript's built-in formatter
-      const formatHost: ts.FormatDiagnosticsHost = {
-        getCanonicalFileName: (path) => path,
-        getCurrentDirectory: ts.sys.getCurrentDirectory,
-        getNewLine: () => ts.sys.newLine,
-      };
-
-      const output = ts.formatDiagnosticsWithColorAndContext(
-        diagnostics,
-        formatHost
-      );
-      process.stderr.write(output);
-      return false;
-    }
-    return true;
   }
 
   public async copyNonTsFiles() {
@@ -264,19 +267,9 @@ export class LtNode {
       process.on("SIGINT", () => {
         nodeProcess.kill();
       });
-    });
-  }
-
-  /**
-   * Build the project with SWC and run the transpiled entry point.
-   */
-  public async buildAndRun({ entryPoint }: { entryPoint: string }) {
-    // Build the project with SWC and copy non-ts files to the output dir
-    await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
-
-    // Run the transpiled entry point
-    await this.runNodeJs({
-      entryPoint,
+      process.on("exit", () => {
+        nodeProcess.kill();
+      });
     });
   }
 
@@ -286,20 +279,28 @@ export class LtNode {
   public async run(entryPoint: string): Promise<void> {
     await this.parseTsConfig();
 
-    // Build and run immediately
-    await this.buildAndRun({ entryPoint });
+    // Build the project with SWC and copy non-ts files to the output dir
+    await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
 
-    // Start type checking
+    // Start the Node.js process
+    const runProcess = this.runNodeJs({ entryPoint });
+
+    // Start type checking immediately without awaiting
     if (process.env.TYPE_CHECK !== "false") {
-      this.typeCheck().then((passed) => {
-        if (!passed) {
-          helper.log({
-            type: "error",
-            message:
-              "Type-check failed - see errors above. Your code is still running.",
-          });
-        }
-      });
+      setTimeout(() => {
+        // Don't await this promise
+        this.typeCheck().then((passed) => {
+          if (!passed) {
+            helper.log({
+              type: "error",
+              message: "Type-check failed - see errors above.",
+            });
+          }
+        });
+      }, 0);
     }
+
+    // Only wait for the Node.js process to exit
+    await runProcess;
   }
 }
