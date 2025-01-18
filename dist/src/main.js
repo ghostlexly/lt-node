@@ -14,16 +14,19 @@ const child_process_1 = require("child_process");
 const logger_1 = require("./logger");
 const chokidar_1 = __importDefault(require("chokidar"));
 const chalk_1 = __importDefault(require("chalk"));
+const debug_1 = __importDefault(require("debug"));
 class LtNode {
     tsconfigPath;
     parsedTsConfig;
     isWatching = false;
     isNoCheck = false;
     currentNodeProcess = null;
+    debug = (0, debug_1.default)("lt-node");
     constructor(tsconfigPath = path_1.default.join(process.cwd(), "tsconfig.json")) {
         this.tsconfigPath = tsconfigPath;
     }
     parseTsConfig = async () => {
+        this.debug("parseTsConfig - parsing tsconfig.json");
         if (!(0, fs_1.existsSync)(this.tsconfigPath)) {
             this.parsedTsConfig = {
                 options: {
@@ -38,6 +41,7 @@ class LtNode {
                 }),
                 errors: [],
             };
+            this.debug("parseTsConfig - no tsconfig.json file found, using default");
             return this.parsedTsConfig;
         }
         const parsedCommandLine = typescript_1.default.getParsedCommandLineOfConfigFile(this.tsconfigPath, {}, {
@@ -50,6 +54,7 @@ class LtNode {
             throw new Error(`Failed to parse ${this.tsconfigPath}`);
         }
         this.parsedTsConfig = parsedCommandLine;
+        this.debug("parseTsConfig - parsed tsconfig.json");
         return parsedCommandLine;
     };
     getOutputDir = async () => {
@@ -95,6 +100,7 @@ class LtNode {
         }
     };
     buildProjectWithSwc = async () => {
+        this.debug("buildProjectWithSwc - building project with swc");
         const { options: tsOptions, fileNames } = this.parsedTsConfig;
         const outputDir = await this.getOutputDir();
         const rootDir = tsOptions.rootDir ?? process.cwd();
@@ -127,8 +133,10 @@ class LtNode {
                 map ? promises_1.default.writeFile(outFile + ".map", map, "utf8") : Promise.resolve(),
             ]);
         }));
+        this.debug("buildProjectWithSwc - built project with swc");
     };
     typeCheck = () => {
+        this.debug("typeCheck - type checking project");
         return new Promise((resolve) => {
             const program = typescript_1.default.createProgram({
                 rootNames: this.parsedTsConfig.fileNames,
@@ -146,12 +154,15 @@ class LtNode {
                 };
                 const output = typescript_1.default.formatDiagnosticsWithColorAndContext(diagnostics, formatHost);
                 process.stderr.write(output);
+                this.debug("typeCheck - type check failed");
                 resolve(false);
             }
+            this.debug("typeCheck - type checked project");
             resolve(true);
         });
     };
     copyNonTsFiles = async () => {
+        this.debug("copyNonTsFiles - copying non-ts files");
         const { options: tsOptions } = this.parsedTsConfig;
         const outputDir = await this.getOutputDir();
         const rootDir = tsOptions.rootDir ?? process.cwd();
@@ -166,6 +177,7 @@ class LtNode {
             await promises_1.default.mkdir(path_1.default.dirname(destPath), { recursive: true });
             await promises_1.default.copyFile(sourcePath, destPath);
         }
+        this.debug("copyNonTsFiles - copied non-ts files");
     };
     getArgs = ({ entryPoint }) => {
         const entryPointIndex = process.argv.indexOf(entryPoint);
@@ -184,22 +196,27 @@ class LtNode {
     };
     stopNodeProcess = async () => {
         try {
+            this.debug("stopNodeProcess - stopping node process");
             await new Promise((resolve, reject) => {
                 if (!this.currentNodeProcess) {
+                    this.debug("stopNodeProcess - no node process to stop");
                     resolve(true);
                     return;
                 }
-                this.currentNodeProcess.on("close", () => {
+                const cleanup = () => {
                     this.currentNodeProcess = null;
-                    resolve(true);
-                });
-                this.currentNodeProcess.kill("SIGTERM");
+                    this.debug("stopNodeProcess - node process terminated");
+                    setTimeout(resolve, 100);
+                };
+                this.currentNodeProcess.on("exit", cleanup);
+                this.currentNodeProcess.on("close", cleanup);
+                this.debug("stopNodeProcess - killing node process");
+                this.currentNodeProcess.kill("SIGKILL");
             });
         }
-        catch (error) {
-            this.currentNodeProcess?.kill("SIGKILL");
+        catch {
+            this.debug("stopNodeProcess - error stopping node process");
             this.currentNodeProcess = null;
-            throw error;
         }
     };
     runNodeJs = async ({ entryPoint }) => {
@@ -209,6 +226,7 @@ class LtNode {
             await this.stopNodeProcess();
         }
         return new Promise((resolve, reject) => {
+            this.debug("runNodeJs - spawning new node process");
             const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
             const filteredExecArgs = execArgs.filter((arg) => arg !== "--watch" && arg !== "--noCheck");
             this.currentNodeProcess = (0, child_process_1.spawn)("node", [...filteredExecArgs, entryJs, ...scriptArgs], {
