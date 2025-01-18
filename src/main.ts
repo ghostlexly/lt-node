@@ -13,6 +13,7 @@ export class LtNode {
   private tsconfigPath: string;
   private parsedTsConfig: ts.ParsedCommandLine;
   private isWatching: boolean = false;
+  private isNoCheck: boolean = false;
   private currentNodeProcess: ReturnType<typeof spawn> | null = null;
 
   constructor(tsconfigPath = path.join(process.cwd(), "tsconfig.json")) {
@@ -232,7 +233,7 @@ export class LtNode {
   /**
    * Get the arguments and separate node args from script args, so we can pass them to the child process.
    */
-  private async getArgs({ entryPoint }: { entryPoint: string }) {
+  private getArgs({ entryPoint }: { entryPoint: string }) {
     // Get the arguments and separate node args from script args
     const entryPointIndex = process.argv.indexOf(entryPoint);
     const allArgs = process.argv.slice(entryPointIndex + 1);
@@ -270,7 +271,7 @@ export class LtNode {
     }
 
     // Create a new Node.js process with the arguments
-    const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
+    const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
     this.currentNodeProcess = spawn(
       "node",
       [...execArgs, entryJs, ...scriptArgs],
@@ -312,7 +313,7 @@ export class LtNode {
       const runProcess = this.runNodeJs({ entryPoint });
 
       // Perform type checking if enabled
-      if (process.env.TYPE_CHECK !== "false") {
+      if (!this.isNoCheck) {
         setTimeout(() => {
           // Don't await this promise
           this.typeCheck().then((passed) => {
@@ -402,10 +403,13 @@ export class LtNode {
    */
   public async run(entryPoint: string): Promise<void> {
     // Get the arguments
-    const { execArgs } = await this.getArgs({ entryPoint });
+    const { execArgs } = this.getArgs({ entryPoint });
 
     // Check if we're in watch mode
     this.isWatching = execArgs.includes("--watch");
+
+    // Check if we're skipping type checking
+    this.isNoCheck = execArgs.includes("--noCheck");
 
     // Parse the tsconfig.json file
     await this.parseTsConfig();

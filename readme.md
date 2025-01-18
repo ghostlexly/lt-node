@@ -30,6 +30,11 @@ To execute a TypeScript file, use:
 lt-node src/main.ts
 ```
 
+### Arguments
+
+- `--watch`: Watch for file changes and automatically recompile and rerun the TypeScript files.
+- `--noCheck`: Skip type checking, only compile and run the TypeScript files for faster execution.
+
 ## Comparison with Other TypeScript Runtimes
 
 | Feature                                         | LT-Node                 | ts-node            | tsx                         | ts-node-dev        | bun                               |
