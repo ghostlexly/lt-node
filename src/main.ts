@@ -86,20 +86,25 @@ export class LtNode {
     }
   }
 
-  private async buildProjectWithSwc() {
-    // 1) Parse tsconfig.json
-    const parsed = await this.getParsedCommandLine();
-    const { fileNames, options } = parsed;
-    const outputDir = await this.getOutputDir(options);
+  private async buildProjectWithSwc({
+    parsedTsConfig,
+  }: {
+    parsedTsConfig: ts.ParsedCommandLine;
+  }) {
+    // Get the file names and options from the parsed tsconfig and find the output dir
+    const { options: tsOptions, fileNames } = parsedTsConfig;
+    const outputDir = await this.getOutputDir(tsOptions);
 
-    // 2) Map TS options to SWC equivalents
-    const swcTarget = this.mapTarget(options.target ?? ts.ScriptTarget.ES2022);
+    // Map TS options to SWC equivalents
+    const swcTarget = this.mapTarget(
+      tsOptions.target ?? ts.ScriptTarget.ES2022
+    );
     const swcModule = this.mapModuleKind(
-      options.module ?? ts.ModuleKind.ESNext
+      tsOptions.module ?? ts.ModuleKind.ESNext
     );
 
     // If there's a rootDir set, we can replicate the relative path structure in outDir
-    const rootDir = options.rootDir ?? process.cwd();
+    const rootDir = tsOptions.rootDir ?? process.cwd();
 
     // 3) Transpile each file using SWC
     for (const tsFile of fileNames) {
@@ -118,12 +123,12 @@ export class LtNode {
             tsx: false,
 
             // enable if you use experimental decorators:
-            decorators: !!options.experimentalDecorators,
+            decorators: !!tsOptions.experimentalDecorators,
           },
           target: swcTarget,
 
-          baseUrl: options.baseUrl,
-          paths: options.paths,
+          baseUrl: tsOptions.baseUrl,
+          paths: tsOptions.paths,
         },
 
         module: {
@@ -145,17 +150,60 @@ export class LtNode {
   }
 
   public async run(entryPoint: string): Promise<void> {
+    const parsedTsConfig = await this.getParsedCommandLine();
+    const tsOptions = parsedTsConfig.options;
+
+    // Get the output directory and resolve the transpiled entry point path
+    const outputDir = await this.getOutputDir(tsOptions);
+    const entryJs = path.join(
+      outputDir,
+      path.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js")
+    );
+
+    // Get the arguments and separate node args from script args
+    const entryPointIndex = process.argv.indexOf(entryPoint);
+    const allArgs = process.argv.slice(entryPointIndex + 1);
+
+    // Separate Node.js args (starting with --) from script args
+    const execArgs: string[] = [];
+    const scriptArgs: string[] = [];
+
+    allArgs.forEach((arg) => {
+      if (arg.startsWith("--")) {
+        execArgs.push(arg);
+      } else {
+        scriptArgs.push(arg);
+      }
+    });
+
     // (Optional) Type-check your code separately with "tsc --noEmit" if you want type safety.
     // For example:
     //   import { execSync } from "child_process";
     //   execSync(`tsc --noEmit -p ${this.tsconfigPath}`, { stdio: "inherit" });
 
-    // Then transpile with SWC
-    await this.buildProjectWithSwc();
+    // Transpile with SWC
+    await this.buildProjectWithSwc({ parsedTsConfig });
 
-    // If you need to execute the output after build:
-    // const outDir = await this.getOutputDir((await this.getParsedCommandLine()).options);
-    // const entryJs = path.join(outDir, entryPoint.replace(/\.ts$/, ".js"));
-    // require(entryJs);
+    // Create a new Node.js process with the arguments
+    const { spawn } = await import("child_process");
+    const nodeProcess = spawn("node", [...execArgs, entryJs, ...scriptArgs], {
+      stdio: "inherit",
+      env: process.env,
+    });
+
+    // Handle the process exit
+    return new Promise((resolve, reject) => {
+      nodeProcess.on("exit", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Process exited with code ${code}`));
+        }
+      });
+
+      nodeProcess.on("error", (err) => {
+        reject(err);
+      });
+    });
   }
 }

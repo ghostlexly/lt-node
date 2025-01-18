@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -33,7 +66,7 @@ class LtNode {
         }
         const outDir = tsOptions.outDir
             ? path_1.default.resolve(tsOptions.outDir)
-            : path_1.default.join(process.cwd(), ".ts-cache");
+            : path_1.default.join(process.cwd(), "dist");
         if (!(0, fs_1.existsSync)(outDir)) {
             await promises_1.default.mkdir(outDir, { recursive: true });
         }
@@ -72,41 +105,26 @@ class LtNode {
                 return "es6";
         }
     }
-    convertTsPathsToSwcAlias(baseUrl, paths) {
-        const alias = {};
-        if (!baseUrl || !paths)
-            return alias;
-        for (const [tsKey, tsPaths] of Object.entries(paths)) {
-            const firstTarget = tsPaths[0];
-            const tsKeyNoStar = tsKey.replace(/\*$/, "");
-            const firstTargetNoStar = firstTarget.replace(/\*$/, "");
-            const absPath = path_1.default.join(baseUrl, firstTargetNoStar);
-            alias[tsKeyNoStar] = absPath;
-        }
-        return alias;
-    }
-    async buildProjectWithSwc() {
-        const parsed = await this.getParsedCommandLine();
-        const { fileNames, options } = parsed;
-        const outDir = await this.getOutputDir(options);
-        const swcTarget = this.mapTarget(options.target ?? typescript_1.default.ScriptTarget.ES2022);
-        const swcModule = this.mapModuleKind(options.module ?? typescript_1.default.ModuleKind.ESNext);
-        const alias = this.convertTsPathsToSwcAlias(options.baseUrl, options.paths);
-        const rootDir = options.rootDir ?? process.cwd();
+    async buildProjectWithSwc({ parsedTsConfig, }) {
+        const { options: tsOptions, fileNames } = parsedTsConfig;
+        const outputDir = await this.getOutputDir(tsOptions);
+        const swcTarget = this.mapTarget(tsOptions.target ?? typescript_1.default.ScriptTarget.ES2022);
+        const swcModule = this.mapModuleKind(tsOptions.module ?? typescript_1.default.ModuleKind.ESNext);
+        const rootDir = tsOptions.rootDir ?? process.cwd();
         for (const tsFile of fileNames) {
             const relPath = path_1.default.relative(rootDir, tsFile);
-            const outFile = path_1.default.join(outDir, relPath.replace(/\.tsx?$/, ".js"));
+            const outFile = path_1.default.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
             await promises_1.default.mkdir(path_1.default.dirname(outFile), { recursive: true });
             const { code, map } = await (0, core_1.transformFile)(tsFile, {
                 jsc: {
                     parser: {
                         syntax: "typescript",
                         tsx: false,
-                        decorators: !!options.experimentalDecorators,
+                        decorators: !!tsOptions.experimentalDecorators,
                     },
                     target: swcTarget,
-                    baseUrl: options.baseUrl,
-                    paths: options.paths,
+                    baseUrl: tsOptions.baseUrl,
+                    paths: tsOptions.paths,
                 },
                 module: {
                     type: swcModule,
@@ -122,7 +140,43 @@ class LtNode {
         }
     }
     async run(entryPoint) {
-        await this.buildProjectWithSwc();
+        const parsedTsConfig = await this.getParsedCommandLine();
+        const tsOptions = parsedTsConfig.options;
+        const outputDir = await this.getOutputDir(tsOptions);
+        const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
+        const entryPointIndex = process.argv.indexOf(entryPoint);
+        const allArgs = process.argv.slice(entryPointIndex + 1);
+        const execArgs = [];
+        const scriptArgs = [];
+        allArgs.forEach((arg) => {
+            if (arg.startsWith("--")) {
+                execArgs.push(arg);
+            }
+            else {
+                scriptArgs.push(arg);
+            }
+        });
+        await this.buildProjectWithSwc({ parsedTsConfig });
+        console.log("LT-Node", "node args:", execArgs);
+        console.log("LT-Node", "script args:", scriptArgs);
+        const { spawn } = await Promise.resolve().then(() => __importStar(require("child_process")));
+        const nodeProcess = spawn("node", [...execArgs, entryJs, ...scriptArgs], {
+            stdio: "inherit",
+            env: process.env,
+        });
+        return new Promise((resolve, reject) => {
+            nodeProcess.on("exit", (code) => {
+                if (code === 0) {
+                    resolve();
+                }
+                else {
+                    reject(new Error(`Process exited with code ${code}`));
+                }
+            });
+            nodeProcess.on("error", (err) => {
+                reject(err);
+            });
+        });
     }
 }
 exports.LtNode = LtNode;
