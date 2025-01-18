@@ -107,11 +107,25 @@ class LtNode {
         }
     }
     async typeCheck() {
-        await helper_1.helper
-            .asyncSpawn(`tsc --noEmit -p ${this.tsconfigPath}`)
-            .catch(() => {
-            helper_1.helper.log({ message: "Type-checks failed !", type: "error" });
+        const program = typescript_1.default.createProgram({
+            rootNames: this.parsedTsConfig.fileNames,
+            options: this.parsedTsConfig.options,
         });
+        const diagnostics = [
+            ...program.getSemanticDiagnostics(),
+            ...program.getSyntacticDiagnostics(),
+        ];
+        if (diagnostics.length > 0) {
+            const formatHost = {
+                getCanonicalFileName: (path) => path,
+                getCurrentDirectory: typescript_1.default.sys.getCurrentDirectory,
+                getNewLine: () => typescript_1.default.sys.newLine,
+            };
+            const output = typescript_1.default.formatDiagnosticsWithColorAndContext(diagnostics, formatHost);
+            process.stderr.write(output);
+            return false;
+        }
+        return true;
     }
     async getArgs({ entryPoint }) {
         const entryPointIndex = process.argv.indexOf(entryPoint);
@@ -161,7 +175,17 @@ class LtNode {
     }
     async run(entryPoint) {
         await this.parseTsConfig();
-        await Promise.all([this.typeCheck(), this.buildAndRun({ entryPoint })]);
+        await this.buildAndRun({ entryPoint });
+        if (process.env.TYPE_CHECK !== "false") {
+            this.typeCheck().then((passed) => {
+                if (!passed) {
+                    helper_1.helper.log({
+                        type: "error",
+                        message: "Type-check failed - see errors above. Your code is still running.",
+                    });
+                }
+            });
+        }
     }
 }
 exports.LtNode = LtNode;

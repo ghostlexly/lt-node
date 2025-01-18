@@ -148,14 +148,35 @@ export class LtNode {
   }
 
   /**
-   * Type-check the codebase separately with "tsc --noEmit" for type safety.
+   * Type-check the codebase using TypeScript compiler API
    */
-  public async typeCheck() {
-    await helper
-      .asyncSpawn(`tsc --noEmit -p ${this.tsconfigPath}`)
-      .catch(() => {
-        helper.log({ message: "Type-checks failed !", type: "error" });
-      });
+  public async typeCheck(): Promise<boolean> {
+    const program = ts.createProgram({
+      rootNames: this.parsedTsConfig.fileNames,
+      options: this.parsedTsConfig.options,
+    });
+
+    const diagnostics = [
+      ...program.getSemanticDiagnostics(),
+      ...program.getSyntacticDiagnostics(),
+    ];
+
+    if (diagnostics.length > 0) {
+      // Use TypeScript's built-in formatter
+      const formatHost: ts.FormatDiagnosticsHost = {
+        getCanonicalFileName: (path) => path,
+        getCurrentDirectory: ts.sys.getCurrentDirectory,
+        getNewLine: () => ts.sys.newLine,
+      };
+
+      const output = ts.formatDiagnosticsWithColorAndContext(
+        diagnostics,
+        formatHost
+      );
+      process.stderr.write(output);
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -241,7 +262,20 @@ export class LtNode {
   public async run(entryPoint: string): Promise<void> {
     await this.parseTsConfig();
 
-    // Run the type-check and build the project with SWC in parallel
-    await Promise.all([this.typeCheck(), this.buildAndRun({ entryPoint })]);
+    // Build and run immediately
+    await this.buildAndRun({ entryPoint });
+
+    // Start type checking
+    if (process.env.TYPE_CHECK !== "false") {
+      this.typeCheck().then((passed) => {
+        if (!passed) {
+          helper.log({
+            type: "error",
+            message:
+              "Type-check failed - see errors above. Your code is still running.",
+          });
+        }
+      });
+    }
   }
 }
