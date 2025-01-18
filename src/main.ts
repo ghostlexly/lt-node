@@ -2,83 +2,153 @@ import path from "path";
 import fs from "fs/promises";
 import { existsSync } from "fs";
 import ts from "typescript";
-import tmp from "tmp";
+import { JscTarget, transformFile } from "@swc/core";
 
 export class LtNode {
   private outputDir: string;
-  private tempDir: string;
-  private sourceDir: string;
+  private tsconfigPath: string;
 
-  constructor(options = {}) {
-    this.sourceDir = process.cwd();
+  constructor(tsconfigPath = path.join(process.cwd(), "tsconfig.json")) {
+    this.tsconfigPath = tsconfigPath;
   }
 
-  private getOutputDir = async () => {
-    // If output dir is already set, return it
+  private async getParsedCommandLine() {
+    // This method calls TS's higher-level API to parse the config
+    const parsedCommandLine = ts.getParsedCommandLineOfConfigFile(
+      this.tsconfigPath,
+      /* configOverrides */ {},
+      {
+        ...ts.sys,
+        onUnRecoverableConfigFileDiagnostic: (diag) => {
+          throw new Error(
+            ts.flattenDiagnosticMessageText(diag.messageText, "\n")
+          );
+        },
+      }
+    );
+
+    if (!parsedCommandLine) {
+      throw new Error(`Failed to parse ${this.tsconfigPath}`);
+    }
+
+    return parsedCommandLine;
+  }
+
+  private async getOutputDir(tsOptions: ts.CompilerOptions) {
     if (this.outputDir) {
       return this.outputDir;
     }
 
-    // If output dir is not set, create it and set it
-    const outputDir = path.join(this.sourceDir, ".ts-cache");
+    const outDir = tsOptions.outDir
+      ? path.resolve(tsOptions.outDir)
+      : path.join(process.cwd(), ".ts-cache");
 
-    if (!existsSync(outputDir)) {
-      await fs.mkdir(outputDir, { recursive: true });
+    if (!existsSync(outDir)) {
+      await fs.mkdir(outDir, { recursive: true });
     }
 
-    this.outputDir = outputDir;
+    this.outputDir = outDir;
+    return outDir;
+  }
 
-    return outputDir;
-  };
+  private mapTarget(tsTarget: ts.ScriptTarget): JscTarget {
+    switch (tsTarget) {
+      case ts.ScriptTarget.ES5:
+        return "es5";
+      case ts.ScriptTarget.ES2015:
+        return "es2015";
+      case ts.ScriptTarget.ES2016:
+        return "es2016";
+      case ts.ScriptTarget.ES2017:
+        return "es2017";
+      case ts.ScriptTarget.ES2018:
+        return "es2018";
+      case ts.ScriptTarget.ES2019:
+        return "es2019";
+      case ts.ScriptTarget.ES2020:
+        return "es2020";
+      case ts.ScriptTarget.ES2021:
+        return "es2021";
+      case ts.ScriptTarget.ES2022:
+        return "es2022";
+      default:
+        return "es2022";
+    }
+  }
 
-  private buildProject = async () => {
-    try {
-      const configPath = path.join(process.cwd(), "tsconfig.json");
+  private mapModuleKind(tsModuleKind: ts.ModuleKind): "commonjs" | "es6" {
+    switch (tsModuleKind) {
+      case ts.ModuleKind.CommonJS:
+        return "commonjs";
+      // For ESNext, ES2015, ES2020, etc., treat them as ESM ("es6") in SWC's nomenclature.
+      default:
+        return "es6";
+    }
+  }
 
-      const parsedCommandLine = ts.getParsedCommandLineOfConfigFile(
-        configPath,
-        {},
-        {
-          ...ts.sys,
-          onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
-            throw new Error(
-              ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
-            );
+  private async buildProjectWithSwc() {
+    // 1) Parse tsconfig.json
+    const parsed = await this.getParsedCommandLine();
+    const { fileNames, options } = parsed;
+    const outDir = await this.getOutputDir(options);
+
+    // 2) Map TS options to SWC equivalents
+    const swcTarget = this.mapTarget(options.target ?? ts.ScriptTarget.ES2022);
+    const swcModule = this.mapModuleKind(
+      options.module ?? ts.ModuleKind.ESNext
+    );
+
+    // If there's a rootDir set, we can replicate the relative path structure in outDir
+    const rootDir = options.rootDir ?? process.cwd();
+
+    // 3) Transpile each file using SWC
+    for (const tsFile of fileNames) {
+      const relPath = path.relative(rootDir, tsFile);
+      const outFile = path.join(outDir, relPath.replace(/\.tsx?$/, ".js"));
+
+      // Ensure sub-folders exist
+      await fs.mkdir(path.dirname(outFile), { recursive: true });
+
+      const { code, map } = await transformFile(tsFile, {
+        jsc: {
+          parser: {
+            syntax: "typescript",
+
+            // we can enable tsx if needed:
+            tsx: false,
+
+            // enable if you use experimental decorators:
+            decorators: !!options.experimentalDecorators,
           },
-        }
-      );
-
-      if (!parsedCommandLine) {
-        throw new Error(`Failed to parse tsconfig at ${configPath}`);
-      }
-
-      const outputDir = parsedCommandLine.options.outDir;
-
-      // Second run with type checking disabled
-      const programNoTypes = ts.createProgram(parsedCommandLine.fileNames, {
-        ...parsedCommandLine.options,
-        noEmit: false,
-        emitDeclarationOnly: false,
-        noEmitOnError: false,
-        incremental: true,
-        noCheck: true, // Disable type checking
-        skipLibCheck: true,
-        composite: true,
+          target: swcTarget,
+        },
+        module: {
+          type: swcModule,
+        },
+        sourceMaps: true, // or map from TS if you prefer
       });
 
-      // Emit the compiled files
-      programNoTypes.emit();
-    } catch (error) {
-      throw error;
+      // 4) Write the output and source map
+      await fs.writeFile(outFile, code, "utf8");
+
+      if (map) {
+        await fs.writeFile(outFile + ".map", map, "utf8");
+      }
     }
-  };
+  }
 
   public async run(entryPoint: string): Promise<void> {
-    await this.buildProject();
+    // (Optional) Type-check your code separately with "tsc --noEmit" if you want type safety.
+    // For example:
+    //   import { execSync } from "child_process";
+    //   execSync(`tsc --noEmit -p ${this.tsconfigPath}`, { stdio: "inherit" });
 
-    // const relativePath = path.relative(
-    //   this.sourceDir,
-    //   path.resolve(entryPoint)
-    // );
+    // Then transpile with SWC
+    await this.buildProjectWithSwc();
+
+    // If you need to execute the output after build:
+    // const outDir = await this.getOutputDir((await this.getParsedCommandLine()).options);
+    // const entryJs = path.join(outDir, entryPoint.replace(/\.ts$/, ".js"));
+    // require(entryJs);
   }
 }

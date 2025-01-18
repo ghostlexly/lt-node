@@ -12,7 +12,8 @@ async function main() {
     }
     const runner = new main_1.LtNode();
     await runner.run(filename);
-    console.log(`Build time: ${performance.now() - bootstrapTime}ms`);
+    const buildTime = performance.now() - bootstrapTime;
+    console.log(`Build time: ${buildTime.toFixed(2)}ms`);
 }
 main().catch((error) => {
     console.error(error);
