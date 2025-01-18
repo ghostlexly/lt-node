@@ -20,7 +20,7 @@ export class LtNode {
     this.tsconfigPath = tsconfigPath;
   }
 
-  private async parseTsConfig() {
+  private parseTsConfig = async () => {
     // Use a default configuration if the tsconfig.json does not exist
     if (!existsSync(this.tsconfigPath)) {
       this.parsedTsConfig = {
@@ -61,9 +61,9 @@ export class LtNode {
     this.parsedTsConfig = parsedCommandLine;
 
     return parsedCommandLine;
-  }
+  };
 
-  private async getOutputDir() {
+  private getOutputDir = async () => {
     const { options: tsOptions } = this.parsedTsConfig;
 
     const outDir = tsOptions.outDir
@@ -75,9 +75,9 @@ export class LtNode {
     }
 
     return outDir;
-  }
+  };
 
-  private mapTarget(tsTarget: ts.ScriptTarget): JscTarget {
+  private mapTarget = (tsTarget: ts.ScriptTarget): JscTarget => {
     switch (tsTarget) {
       case ts.ScriptTarget.ES5:
         return "es5";
@@ -100,9 +100,9 @@ export class LtNode {
       default:
         return "es2022";
     }
-  }
+  };
 
-  private mapModuleKind(tsModuleKind: ts.ModuleKind): "commonjs" | "es6" {
+  private mapModuleKind = (tsModuleKind: ts.ModuleKind): "commonjs" | "es6" => {
     switch (tsModuleKind) {
       case ts.ModuleKind.CommonJS:
         return "commonjs";
@@ -110,9 +110,9 @@ export class LtNode {
       default:
         return "es6";
     }
-  }
+  };
 
-  private async buildProjectWithSwc() {
+  private buildProjectWithSwc = async () => {
     // Get the file names and options from the parsed tsconfig and find the output dir
     const { options: tsOptions, fileNames } = this.parsedTsConfig;
     const outputDir = await this.getOutputDir();
@@ -170,12 +170,12 @@ export class LtNode {
         ]);
       })
     );
-  }
+  };
 
   /**
    * Type-check the codebase using TypeScript compiler API
    */
-  private typeCheck(): Promise<boolean> {
+  private typeCheck = (): Promise<boolean> => {
     return new Promise((resolve) => {
       const program = ts.createProgram({
         rootNames: this.parsedTsConfig.fileNames,
@@ -205,9 +205,9 @@ export class LtNode {
 
       resolve(true);
     });
-  }
+  };
 
-  public async copyNonTsFiles() {
+  public copyNonTsFiles = async () => {
     const { options: tsOptions } = this.parsedTsConfig;
     const outputDir = await this.getOutputDir();
     const rootDir = tsOptions.rootDir ?? process.cwd();
@@ -228,12 +228,12 @@ export class LtNode {
       // Copy the file
       await fs.copyFile(sourcePath, destPath);
     }
-  }
+  };
 
   /**
    * Get the arguments and separate node args from script args, so we can pass them to the child process.
    */
-  private getArgs({ entryPoint }: { entryPoint: string }) {
+  private getArgs = ({ entryPoint }: { entryPoint: string }) => {
     // Get the arguments and separate node args from script args
     const entryPointIndex = process.argv.indexOf(entryPoint);
     const allArgs = process.argv.slice(entryPointIndex + 1);
@@ -251,12 +251,12 @@ export class LtNode {
     });
 
     return { execArgs, scriptArgs };
-  }
+  };
 
   /**
    * Run the transpiled entry point with a new Node.js process.
    */
-  private async runNodeJs({ entryPoint }: { entryPoint: string }) {
+  private runNodeJs = async ({ entryPoint }: { entryPoint: string }) => {
     // Get the output directory and resolve the transpiled entry point path
     const outputDir = await this.getOutputDir();
 
@@ -299,12 +299,12 @@ export class LtNode {
         }
       });
     });
-  }
+  };
 
   /**
    * Build, type check, and run the entry point.
    */
-  private async buildAndRun(entryPoint: string) {
+  private buildAndRun = async (entryPoint: string) => {
     try {
       // Build project and copy files
       await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
@@ -334,47 +334,39 @@ export class LtNode {
         message: String(error),
       });
     }
-  }
+  };
 
-  private debounce(func: Function, wait: number) {
-    let timeout: NodeJS.Timeout;
-    return (...args: any[]) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func.apply(this, args), wait);
-    };
-  }
-
-  private async watchFiles(entryPoint: string) {
+  private watchFiles = async (entryPoint: string) => {
     const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
     const outputDir = await this.getOutputDir();
 
     const watcher = chokidar.watch(rootDir, {
       ignored: (watchPath, stats) => {
         // Ignore node_modules
-        if (watchPath.includes(path.join(rootDir, "node_modules"))) {
-          return true;
-        }
+        // if (watchPath.includes(path.join(rootDir, "node_modules"))) {
+        //   return true;
+        // }
 
         // Ignore .git
-        if (watchPath.includes(path.join(rootDir, ".git"))) {
-          return true;
-        }
+        // if (watchPath.includes(path.join(rootDir, ".git"))) {
+        //   return true;
+        // }
 
         // Ignore the output directory
         if (watchPath.includes(outputDir)) {
           return true;
         }
 
-        if (
-          stats?.isFile() &&
-          !watchPath.endsWith(".ts") &&
-          !watchPath.endsWith(".tsx") &&
-          !watchPath.endsWith(".js") &&
-          !watchPath.endsWith(".jsx") &&
-          !watchPath.endsWith(".json")
-        ) {
-          return true;
-        }
+        // if (
+        //   stats?.isFile() &&
+        //   !watchPath.endsWith(".ts") &&
+        //   !watchPath.endsWith(".tsx") &&
+        //   !watchPath.endsWith(".js") &&
+        //   !watchPath.endsWith(".jsx") &&
+        //   !watchPath.endsWith(".json")
+        // ) {
+        //   return true;
+        // }
 
         return false;
       },
@@ -386,16 +378,14 @@ export class LtNode {
       ignoreInitial: true,
     });
 
-    const debouncedBuildAndRun = this.debounce(async (filename: string) => {
+    watcher.on("change", async (filename) => {
       logger.log({
         type: "info",
         message: `File changed: ${chalk.yellow(filename)}. Rebuilding...`,
       });
 
       await this.buildAndRun(entryPoint);
-    }, 300); // Adjust the debounce delay as needed
-
-    watcher.on("change", debouncedBuildAndRun);
+    });
 
     // Clean up watcher on exit
     process.on("SIGINT", () => {
@@ -406,12 +396,12 @@ export class LtNode {
       type: "info",
       message: "Watching for file changes...",
     });
-  }
+  };
 
   /**
    * The main entry point for the application.
    */
-  public async run(entryPoint: string): Promise<void> {
+  public run = async (entryPoint: string) => {
     // Get the arguments
     const { execArgs } = this.getArgs({ entryPoint });
 
@@ -431,5 +421,5 @@ export class LtNode {
 
     // build, type check, run
     await this.buildAndRun(entryPoint);
-  }
+  };
 }

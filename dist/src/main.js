@@ -18,11 +18,12 @@ class LtNode {
     tsconfigPath;
     parsedTsConfig;
     isWatching = false;
+    isNoCheck = false;
     currentNodeProcess = null;
     constructor(tsconfigPath = path_1.default.join(process.cwd(), "tsconfig.json")) {
         this.tsconfigPath = tsconfigPath;
     }
-    async parseTsConfig() {
+    parseTsConfig = async () => {
         if (!(0, fs_1.existsSync)(this.tsconfigPath)) {
             this.parsedTsConfig = {
                 options: {
@@ -50,8 +51,8 @@ class LtNode {
         }
         this.parsedTsConfig = parsedCommandLine;
         return parsedCommandLine;
-    }
-    async getOutputDir() {
+    };
+    getOutputDir = async () => {
         const { options: tsOptions } = this.parsedTsConfig;
         const outDir = tsOptions.outDir
             ? path_1.default.resolve(tsOptions.outDir)
@@ -60,8 +61,8 @@ class LtNode {
             await promises_1.default.mkdir(outDir, { recursive: true });
         }
         return outDir;
-    }
-    mapTarget(tsTarget) {
+    };
+    mapTarget = (tsTarget) => {
         switch (tsTarget) {
             case typescript_1.default.ScriptTarget.ES5:
                 return "es5";
@@ -84,16 +85,16 @@ class LtNode {
             default:
                 return "es2022";
         }
-    }
-    mapModuleKind(tsModuleKind) {
+    };
+    mapModuleKind = (tsModuleKind) => {
         switch (tsModuleKind) {
             case typescript_1.default.ModuleKind.CommonJS:
                 return "commonjs";
             default:
                 return "es6";
         }
-    }
-    async buildProjectWithSwc() {
+    };
+    buildProjectWithSwc = async () => {
         const { options: tsOptions, fileNames } = this.parsedTsConfig;
         const outputDir = await this.getOutputDir();
         const rootDir = tsOptions.rootDir ?? process.cwd();
@@ -126,8 +127,8 @@ class LtNode {
                 map ? promises_1.default.writeFile(outFile + ".map", map, "utf8") : Promise.resolve(),
             ]);
         }));
-    }
-    typeCheck() {
+    };
+    typeCheck = () => {
         return new Promise((resolve) => {
             const program = typescript_1.default.createProgram({
                 rootNames: this.parsedTsConfig.fileNames,
@@ -149,8 +150,8 @@ class LtNode {
             }
             resolve(true);
         });
-    }
-    async copyNonTsFiles() {
+    };
+    copyNonTsFiles = async () => {
         const { options: tsOptions } = this.parsedTsConfig;
         const outputDir = await this.getOutputDir();
         const rootDir = tsOptions.rootDir ?? process.cwd();
@@ -165,8 +166,8 @@ class LtNode {
             await promises_1.default.mkdir(path_1.default.dirname(destPath), { recursive: true });
             await promises_1.default.copyFile(sourcePath, destPath);
         }
-    }
-    async getArgs({ entryPoint }) {
+    };
+    getArgs = ({ entryPoint }) => {
         const entryPointIndex = process.argv.indexOf(entryPoint);
         const allArgs = process.argv.slice(entryPointIndex + 1);
         const execArgs = [];
@@ -180,14 +181,39 @@ class LtNode {
             }
         });
         return { execArgs, scriptArgs };
-    }
-    async runNodeJs({ entryPoint }) {
+    };
+    stopNodeProcess = async () => {
+        try {
+            await new Promise((resolve, reject) => {
+                if (!this.currentNodeProcess) {
+                    resolve(true);
+                    return;
+                }
+                const timeout = setTimeout(() => {
+                    reject(new Error("Server shutdown timed out after 5000ms"));
+                }, 5000);
+                this.currentNodeProcess.on("close", () => {
+                    clearTimeout(timeout);
+                    this.currentNodeProcess = null;
+                    console.log("Previous server process terminated");
+                    resolve(true);
+                });
+                this.currentNodeProcess.kill("SIGTERM");
+            });
+        }
+        catch (error) {
+            this.currentNodeProcess?.kill("SIGKILL");
+            this.currentNodeProcess = null;
+            throw error;
+        }
+    };
+    runNodeJs = async ({ entryPoint }) => {
         const outputDir = await this.getOutputDir();
         const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
         if (this.currentNodeProcess) {
-            this.currentNodeProcess.kill();
+            await this.stopNodeProcess();
         }
-        const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
+        const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
         this.currentNodeProcess = (0, child_process_1.spawn)("node", [...execArgs, entryJs, ...scriptArgs], {
             stdio: "inherit",
             env: process.env,
@@ -209,12 +235,11 @@ class LtNode {
                 }
             });
         });
-    }
-    async buildAndRun(entryPoint) {
+    };
+    buildAndRun = async (entryPoint) => {
         try {
             await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
-            const runProcess = this.runNodeJs({ entryPoint });
-            if (process.env.TYPE_CHECK !== "false") {
+            if (!this.isNoCheck) {
                 setTimeout(() => {
                     this.typeCheck().then((passed) => {
                         if (!passed) {
@@ -226,7 +251,6 @@ class LtNode {
                     });
                 }, 0);
             }
-            await runProcess;
         }
         catch (error) {
             logger_1.logger.log({
@@ -234,27 +258,13 @@ class LtNode {
                 message: String(error),
             });
         }
-    }
-    async watchFiles(entryPoint) {
+    };
+    watchFiles = async (entryPoint) => {
         const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
         const outputDir = await this.getOutputDir();
         const watcher = chokidar_1.default.watch(rootDir, {
             ignored: (watchPath, stats) => {
-                if (watchPath.includes(path_1.default.join(rootDir, "node_modules"))) {
-                    return true;
-                }
-                if (watchPath.includes(path_1.default.join(rootDir, ".git"))) {
-                    return true;
-                }
                 if (watchPath.includes(outputDir)) {
-                    return true;
-                }
-                if (stats?.isFile() &&
-                    !watchPath.endsWith(".ts") &&
-                    !watchPath.endsWith(".tsx") &&
-                    !watchPath.endsWith(".js") &&
-                    !watchPath.endsWith(".jsx") &&
-                    !watchPath.endsWith(".json")) {
                     return true;
                 }
                 return false;
@@ -278,16 +288,16 @@ class LtNode {
             type: "info",
             message: "Watching for file changes...",
         });
-    }
-    async run(entryPoint) {
-        const { execArgs } = await this.getArgs({ entryPoint });
+    };
+    run = async (entryPoint) => {
+        const { execArgs } = this.getArgs({ entryPoint });
         this.isWatching = execArgs.includes("--watch");
+        this.isNoCheck = execArgs.includes("--noCheck");
         await this.parseTsConfig();
         if (this.isWatching) {
             this.watchFiles(entryPoint);
         }
-        await this.buildAndRun(entryPoint);
-    }
+    };
 }
 exports.LtNode = LtNode;
 //# sourceMappingURL=main.js.map
