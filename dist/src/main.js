@@ -19,6 +19,22 @@ class LtNode {
         this.tsconfigPath = tsconfigPath;
     }
     async parseTsConfig() {
+        if (!(0, fs_1.existsSync)(this.tsconfigPath)) {
+            this.parsedTsConfig = {
+                options: {
+                    target: typescript_1.default.ScriptTarget.ES2020,
+                    module: typescript_1.default.ModuleKind.CommonJS,
+                    outDir: path_1.default.join(process.cwd(), "dist"),
+                    rootDir: process.cwd(),
+                },
+                fileNames: await (0, glob_1.glob)("**/*.ts", {
+                    ignore: ["**/node_modules/**"],
+                    cwd: process.cwd(),
+                }),
+                errors: [],
+            };
+            return this.parsedTsConfig;
+        }
         const parsedCommandLine = typescript_1.default.getParsedCommandLineOfConfigFile(this.tsconfigPath, {}, {
             ...typescript_1.default.sys,
             onUnRecoverableConfigFileDiagnostic: (diag) => {

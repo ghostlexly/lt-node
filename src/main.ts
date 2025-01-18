@@ -16,6 +16,24 @@ export class LtNode {
   }
 
   private async parseTsConfig() {
+    // Use a default configuration if the tsconfig.json does not exist
+    if (!existsSync(this.tsconfigPath)) {
+      this.parsedTsConfig = {
+        options: {
+          target: ts.ScriptTarget.ES2020,
+          module: ts.ModuleKind.CommonJS,
+          outDir: path.join(process.cwd(), "dist"),
+          rootDir: process.cwd(),
+        },
+        fileNames: await glob("**/*.ts", {
+          ignore: ["**/node_modules/**"],
+          cwd: process.cwd(),
+        }),
+        errors: [],
+      };
+      return this.parsedTsConfig;
+    }
+
     // This method calls TS's higher-level API to parse the config
     const parsedCommandLine = ts.getParsedCommandLineOfConfigFile(
       this.tsconfigPath,
