@@ -346,7 +346,8 @@ export class LtNode {
             if (!passed) {
               logger.log({
                 type: "error",
-                message: "Type-check failed - see errors above.",
+                message:
+                  "Type-check failed, see errors above - Your code is still running.",
               });
             }
           });
