@@ -41,7 +41,7 @@ export class LtNode {
 
     const outDir = tsOptions.outDir
       ? path.resolve(tsOptions.outDir)
-      : path.join(process.cwd(), ".ts-cache");
+      : path.join(process.cwd(), "dist");
 
     if (!existsSync(outDir)) {
       await fs.mkdir(outDir, { recursive: true });
@@ -90,7 +90,7 @@ export class LtNode {
     // 1) Parse tsconfig.json
     const parsed = await this.getParsedCommandLine();
     const { fileNames, options } = parsed;
-    const outDir = await this.getOutputDir(options);
+    const outputDir = await this.getOutputDir(options);
 
     // 2) Map TS options to SWC equivalents
     const swcTarget = this.mapTarget(options.target ?? ts.ScriptTarget.ES2022);
@@ -104,7 +104,7 @@ export class LtNode {
     // 3) Transpile each file using SWC
     for (const tsFile of fileNames) {
       const relPath = path.relative(rootDir, tsFile);
-      const outFile = path.join(outDir, relPath.replace(/\.tsx?$/, ".js"));
+      const outFile = path.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
 
       // Ensure sub-folders exist
       await fs.mkdir(path.dirname(outFile), { recursive: true });
