@@ -121,11 +121,18 @@ export class LtNode {
             decorators: !!options.experimentalDecorators,
           },
           target: swcTarget,
+
+          baseUrl: options.baseUrl,
+          paths: options.paths,
         },
+
         module: {
           type: swcModule,
         },
-        sourceMaps: true, // or map from TS if you prefer
+
+        sourceMaps: true,
+        minify: false,
+        swcrc: false,
       });
 
       // 4) Write the output and source map

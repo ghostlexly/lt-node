@@ -72,12 +72,26 @@ class LtNode {
                 return "es6";
         }
     }
+    convertTsPathsToSwcAlias(baseUrl, paths) {
+        const alias = {};
+        if (!baseUrl || !paths)
+            return alias;
+        for (const [tsKey, tsPaths] of Object.entries(paths)) {
+            const firstTarget = tsPaths[0];
+            const tsKeyNoStar = tsKey.replace(/\*$/, "");
+            const firstTargetNoStar = firstTarget.replace(/\*$/, "");
+            const absPath = path_1.default.join(baseUrl, firstTargetNoStar);
+            alias[tsKeyNoStar] = absPath;
+        }
+        return alias;
+    }
     async buildProjectWithSwc() {
         const parsed = await this.getParsedCommandLine();
         const { fileNames, options } = parsed;
         const outDir = await this.getOutputDir(options);
         const swcTarget = this.mapTarget(options.target ?? typescript_1.default.ScriptTarget.ES2022);
         const swcModule = this.mapModuleKind(options.module ?? typescript_1.default.ModuleKind.ESNext);
+        const alias = this.convertTsPathsToSwcAlias(options.baseUrl, options.paths);
         const rootDir = options.rootDir ?? process.cwd();
         for (const tsFile of fileNames) {
             const relPath = path_1.default.relative(rootDir, tsFile);
@@ -91,11 +105,15 @@ class LtNode {
                         decorators: !!options.experimentalDecorators,
                     },
                     target: swcTarget,
+                    baseUrl: options.baseUrl,
+                    paths: options.paths,
                 },
                 module: {
                     type: swcModule,
                 },
                 sourceMaps: true,
+                minify: false,
+                swcrc: false,
             });
             await promises_1.default.writeFile(outFile, code, "utf8");
             if (map) {
