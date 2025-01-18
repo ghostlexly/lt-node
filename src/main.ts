@@ -299,7 +299,10 @@ export class LtNode {
     });
   }
 
-  private async buildAndTypeCheck(entryPoint: string) {
+  /**
+   * Build, type check, and run the entry point.
+   */
+  private async buildAndRun(entryPoint: string) {
     try {
       // Build project and copy files
       await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
@@ -379,7 +382,7 @@ export class LtNode {
         message: `File changed: ${chalk.yellow(filename)}. Rebuilding...`,
       });
 
-      await this.buildAndTypeCheck(entryPoint);
+      await this.buildAndRun(entryPoint);
     });
 
     // Clean up watcher on exit
@@ -411,7 +414,7 @@ export class LtNode {
       this.watchFiles(entryPoint);
     }
 
-    // build and type check
-    await this.buildAndTypeCheck(entryPoint);
+    // build, type check, run
+    await this.buildAndRun(entryPoint);
   }
 }
