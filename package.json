@@ -1,6 +1,6 @@
 {
   "name": "lt-node",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "bin": {
     "lt-node": "./dist/src/cli.js"
   },
