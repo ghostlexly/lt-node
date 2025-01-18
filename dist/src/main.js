@@ -12,9 +12,13 @@ const typescript_1 = __importDefault(require("typescript"));
 const core_1 = require("@swc/core");
 const child_process_1 = require("child_process");
 const helper_1 = require("./helper");
+const chokidar_1 = __importDefault(require("chokidar"));
+const chalk_1 = __importDefault(require("chalk"));
 class LtNode {
     tsconfigPath;
     parsedTsConfig;
+    isWatching = false;
+    currentNodeProcess = null;
     constructor(tsconfigPath = path_1.default.join(process.cwd(), "tsconfig.json")) {
         this.tsconfigPath = tsconfigPath;
     }
@@ -181,42 +185,102 @@ class LtNode {
         const outputDir = await this.getOutputDir();
         const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
         const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
-        const nodeProcess = (0, child_process_1.spawn)("node", [...execArgs, entryJs, ...scriptArgs], {
+        if (this.currentNodeProcess) {
+            this.currentNodeProcess.kill();
+        }
+        this.currentNodeProcess = (0, child_process_1.spawn)("node", [...execArgs, entryJs, ...scriptArgs], {
             stdio: "inherit",
             env: process.env,
         });
         return new Promise((resolve, reject) => {
-            nodeProcess.on("exit", (code) => {
-                if (code === 0 || code === null) {
-                    resolve(true);
+            this.currentNodeProcess.on("exit", (code) => {
+                if (!this.isWatching) {
+                    if (code === 0 || code === null) {
+                        resolve(true);
+                    }
+                    else {
+                        reject(new Error(`Process exited with code ${code}`));
+                    }
                 }
-                else {
-                    reject(new Error(`Process exited with code ${code}`));
+            });
+            this.currentNodeProcess.on("error", (err) => {
+                if (!this.isWatching) {
+                    reject(err);
                 }
-            });
-            nodeProcess.on("error", (err) => {
-                reject(err);
-            });
-            process.on("SIGINT", () => {
-                nodeProcess.kill();
-            });
-            process.on("exit", () => {
-                nodeProcess.kill();
             });
         });
     }
+    async watchFiles(entryPoint) {
+        const { fileNames } = this.parsedTsConfig;
+        const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
+        const outputDir = await this.getOutputDir();
+        const watcher = chokidar_1.default.watch(rootDir, {
+            ignored: (watchPath, stats) => {
+                if (watchPath.includes(path_1.default.join(rootDir, "node_modules"))) {
+                    return true;
+                }
+                if (watchPath.includes(path_1.default.join(rootDir, ".git"))) {
+                    return true;
+                }
+                if (watchPath.includes(outputDir)) {
+                    return true;
+                }
+                if (stats?.isFile() &&
+                    !watchPath.endsWith(".ts") &&
+                    !watchPath.endsWith(".tsx") &&
+                    !watchPath.endsWith(".js") &&
+                    !watchPath.endsWith(".jsx") &&
+                    !watchPath.endsWith(".json")) {
+                    return true;
+                }
+                return false;
+            },
+            persistent: true,
+            usePolling: process.platform === "darwin",
+            atomic: true,
+            ignoreInitial: true,
+        });
+        watcher.on("change", async (filename) => {
+            helper_1.helper.log({
+                type: "info",
+                message: `File changed: ${chalk_1.default.yellow(filename)}. Rebuilding...`,
+            });
+            try {
+                await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+                await this.runNodeJs({ entryPoint });
+                if (process.env.TYPE_CHECK !== "false") {
+                    const passed = await this.typeCheck();
+                    if (!passed) {
+                        console.error("Type-check failed - see errors above.");
+                    }
+                }
+            }
+            catch (error) {
+                console.error(String(error));
+            }
+        });
+        process.on("SIGINT", () => {
+            watcher.close();
+        });
+    }
     async run(entryPoint) {
+        const { execArgs } = await this.getArgs({ entryPoint });
+        this.isWatching = execArgs.includes("--watch");
         await this.parseTsConfig();
         await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+        if (this.isWatching) {
+            await this.watchFiles(entryPoint);
+            helper_1.helper.log({
+                type: "info",
+                message: "Watching for file changes...",
+            });
+        }
         const runProcess = this.runNodeJs({ entryPoint });
         if (process.env.TYPE_CHECK !== "false") {
             setTimeout(() => {
                 this.typeCheck().then((passed) => {
                     if (!passed) {
-                        helper_1.helper.log({
-                            type: "error",
-                            message: "Type-check failed - see errors above.",
-                        });
+                        console.error("Type-check failed - see errors above.");
                     }
                 });
             }, 0);

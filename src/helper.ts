@@ -13,6 +13,8 @@ class Helper {
 
     if (type === "error") {
       typeTag = `${chalk.red("error")}`;
+    } else if (type === "info") {
+      typeTag = `${chalk.yellow("info")}`;
     }
 
     console.log(`${chalk.green("[lt-node]")} - ${typeTag}: ${message}`);

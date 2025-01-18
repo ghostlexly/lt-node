@@ -6,10 +6,14 @@ import ts from "typescript";
 import { JscTarget, transformFile } from "@swc/core";
 import { spawn } from "child_process";
 import { helper } from "./helper";
+import chokidar from "chokidar";
+import chalk from "chalk";
 
 export class LtNode {
   private tsconfigPath: string;
   private parsedTsConfig: ts.ParsedCommandLine;
+  private isWatching: boolean = false;
+  private currentNodeProcess: ReturnType<typeof spawn> | null = null;
 
   constructor(tsconfigPath = path.join(process.cwd(), "tsconfig.json")) {
     this.tsconfigPath = tsconfigPath;
@@ -262,32 +266,108 @@ export class LtNode {
     // Create a new Node.js process with the arguments
     const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
 
-    const nodeProcess = spawn("node", [...execArgs, entryJs, ...scriptArgs], {
-      stdio: "inherit",
-      env: process.env,
-    });
+    // If we're already running a process in watch mode, kill it
+    if (this.currentNodeProcess) {
+      this.currentNodeProcess.kill();
+    }
+
+    this.currentNodeProcess = spawn(
+      "node",
+      [...execArgs, entryJs, ...scriptArgs],
+      {
+        stdio: "inherit",
+        env: process.env,
+      }
+    );
 
     // Handle the process exit
     return new Promise((resolve, reject) => {
-      nodeProcess.on("exit", (code) => {
-        if (code === 0 || code === null) {
-          resolve(true);
-        } else {
-          reject(new Error(`Process exited with code ${code}`));
+      this.currentNodeProcess!.on("exit", (code) => {
+        if (!this.isWatching) {
+          if (code === 0 || code === null) {
+            resolve(true);
+          } else {
+            reject(new Error(`Process exited with code ${code}`));
+          }
         }
       });
 
-      nodeProcess.on("error", (err) => {
-        reject(err);
+      this.currentNodeProcess!.on("error", (err) => {
+        if (!this.isWatching) {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  private async watchFiles(entryPoint: string) {
+    const { fileNames } = this.parsedTsConfig;
+    const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
+    const outputDir = await this.getOutputDir();
+
+    const watcher = chokidar.watch(rootDir, {
+      ignored: (watchPath, stats) => {
+        // Ignore node_modules
+        if (watchPath.includes(path.join(rootDir, "node_modules"))) {
+          return true;
+        }
+
+        // Ignore .git
+        if (watchPath.includes(path.join(rootDir, ".git"))) {
+          return true;
+        }
+
+        // Ignore the output directory
+        if (watchPath.includes(outputDir)) {
+          return true;
+        }
+
+        if (
+          stats?.isFile() &&
+          !watchPath.endsWith(".ts") &&
+          !watchPath.endsWith(".tsx") &&
+          !watchPath.endsWith(".js") &&
+          !watchPath.endsWith(".jsx") &&
+          !watchPath.endsWith(".json")
+        ) {
+          return true;
+        }
+
+        return false;
+      },
+      persistent: true,
+      usePolling: process.platform === "darwin", // Use polling on macOS
+
+      // Increase performance and reduce file descriptors
+      atomic: true,
+      ignoreInitial: true,
+    });
+
+    watcher.on("change", async (filename) => {
+      helper.log({
+        type: "info",
+        message: `File changed: ${chalk.yellow(filename)}. Rebuilding...`,
       });
 
-      // Handle the SIGINT signal (Ctrl+C) to stop the child process before exiting
-      process.on("SIGINT", () => {
-        nodeProcess.kill();
-      });
-      process.on("exit", () => {
-        nodeProcess.kill();
-      });
+      try {
+        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+
+        await this.runNodeJs({ entryPoint });
+
+        if (process.env.TYPE_CHECK !== "false") {
+          const passed = await this.typeCheck();
+          if (!passed) {
+            console.error("Type-check failed - see errors above.");
+          }
+        }
+      } catch (error) {
+        console.error(String(error));
+      }
+    });
+
+    // Clean up watcher on exit
+    process.on("SIGINT", () => {
+      watcher.close();
     });
   }
 
@@ -295,30 +375,42 @@ export class LtNode {
    * The main entry point for the application.
    */
   public async run(entryPoint: string): Promise<void> {
+    // Get the arguments
+    const { execArgs } = await this.getArgs({ entryPoint });
+
+    // Check if we're in watch mode
+    this.isWatching = execArgs.includes("--watch");
+
+    // Parse the tsconfig.json file
     await this.parseTsConfig();
 
     // Build the project with SWC and copy non-ts files to the output dir
     await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
 
+    // If we're in watch mode, start watching for file changes
+    if (this.isWatching) {
+      await this.watchFiles(entryPoint);
+      helper.log({
+        type: "info",
+        message: "Watching for file changes...",
+      });
+    }
+
     // Start the Node.js process
     const runProcess = this.runNodeJs({ entryPoint });
 
-    // Start type checking immediately without awaiting
+    // Start type checking
     if (process.env.TYPE_CHECK !== "false") {
       setTimeout(() => {
-        // Don't await this promise
         this.typeCheck().then((passed) => {
           if (!passed) {
-            helper.log({
-              type: "error",
-              message: "Type-check failed - see errors above.",
-            });
+            console.error("Type-check failed - see errors above.");
+            // Only wait for the Node.js process to exit
           }
         });
       }, 0);
     }
 
-    // Only wait for the Node.js process to exit
     await runProcess;
   }
 }

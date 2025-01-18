@@ -11,6 +11,9 @@ class Helper {
         if (type === "error") {
             typeTag = `${chalk_1.default.red("error")}`;
         }
+        else if (type === "info") {
+            typeTag = `${chalk_1.default.yellow("info")}`;
+        }
         console.log(`${chalk_1.default.green("[lt-node]")} - ${typeTag}: ${message}`);
     };
 }
