@@ -8,6 +8,7 @@ import { spawn } from "child_process";
 import { logger } from "./logger";
 import chokidar from "chokidar";
 import chalk from "chalk";
+import debug from "debug";
 
 export class LtNode {
   private tsconfigPath: string;
@@ -15,12 +16,15 @@ export class LtNode {
   private isWatching: boolean = false;
   private isNoCheck: boolean = false;
   private currentNodeProcess: ReturnType<typeof spawn> | null = null;
+  private debug = debug("lt-node");
 
   constructor(tsconfigPath = path.join(process.cwd(), "tsconfig.json")) {
     this.tsconfigPath = tsconfigPath;
   }
 
   private parseTsConfig = async () => {
+    this.debug("parseTsConfig - parsing tsconfig.json");
+
     // Use a default configuration if the tsconfig.json does not exist
     if (!existsSync(this.tsconfigPath)) {
       this.parsedTsConfig = {
@@ -36,6 +40,8 @@ export class LtNode {
         }),
         errors: [],
       };
+
+      this.debug("parseTsConfig - no tsconfig.json file found, using default");
       return this.parsedTsConfig;
     }
 
@@ -60,6 +66,7 @@ export class LtNode {
     // Set the parsedTsConfig variable
     this.parsedTsConfig = parsedCommandLine;
 
+    this.debug("parseTsConfig - parsed tsconfig.json");
     return parsedCommandLine;
   };
 
@@ -113,6 +120,8 @@ export class LtNode {
   };
 
   private buildProjectWithSwc = async () => {
+    this.debug("buildProjectWithSwc - building project with swc");
+
     // Get the file names and options from the parsed tsconfig and find the output dir
     const { options: tsOptions, fileNames } = this.parsedTsConfig;
     const outputDir = await this.getOutputDir();
@@ -170,12 +179,16 @@ export class LtNode {
         ]);
       })
     );
+
+    this.debug("buildProjectWithSwc - built project with swc");
   };
 
   /**
    * Type-check the codebase using TypeScript compiler API
    */
   private typeCheck = (): Promise<boolean> => {
+    this.debug("typeCheck - type checking project");
+
     return new Promise((resolve) => {
       const program = ts.createProgram({
         rootNames: this.parsedTsConfig.fileNames,
@@ -200,14 +213,19 @@ export class LtNode {
           formatHost
         );
         process.stderr.write(output);
+
+        this.debug("typeCheck - type check failed");
         resolve(false);
       }
 
+      this.debug("typeCheck - type checked project");
       resolve(true);
     });
   };
 
   public copyNonTsFiles = async () => {
+    this.debug("copyNonTsFiles - copying non-ts files");
+
     const { options: tsOptions } = this.parsedTsConfig;
     const outputDir = await this.getOutputDir();
     const rootDir = tsOptions.rootDir ?? process.cwd();
@@ -228,6 +246,8 @@ export class LtNode {
       // Copy the file
       await fs.copyFile(sourcePath, destPath);
     }
+
+    this.debug("copyNonTsFiles - copied non-ts files");
   };
 
   /**
@@ -255,25 +275,31 @@ export class LtNode {
 
   private stopNodeProcess = async () => {
     try {
+      this.debug("stopNodeProcess - stopping node process");
+
       await new Promise((resolve, reject) => {
         if (!this.currentNodeProcess) {
+          this.debug("stopNodeProcess - no node process to stop");
           resolve(true);
           return;
         }
 
-        this.currentNodeProcess.on("close", () => {
+        const cleanup = () => {
           this.currentNodeProcess = null;
+          this.debug("stopNodeProcess - node process terminated");
 
-          // Add small delay to ensure port is released
-          setTimeout(resolve, 100);
-        });
+          setTimeout(resolve, 100); // Add small delay to ensure port is released
+        };
 
+        this.currentNodeProcess.on("exit", cleanup);
+        this.currentNodeProcess.on("close", cleanup);
+
+        this.debug("stopNodeProcess - killing node process");
         this.currentNodeProcess.kill("SIGKILL");
       });
-    } catch (error) {
-      this.currentNodeProcess?.kill("SIGKILL");
+    } catch {
+      this.debug("stopNodeProcess - error stopping node process");
       this.currentNodeProcess = null;
-      throw error;
     }
   };
 
@@ -296,6 +322,8 @@ export class LtNode {
 
     // Handle the process exit
     return new Promise((resolve, reject) => {
+      this.debug("runNodeJs - spawning new node process");
+
       // Create a new Node.js process with the arguments
       const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
 
