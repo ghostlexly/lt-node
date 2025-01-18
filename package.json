@@ -1,6 +1,6 @@
 {
   "name": "lt-node",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "bin": {
     "lt-node": "./dist/src/cli.js"
   },
@@ -14,7 +14,7 @@
   "keywords": [
     "typescript",
     "node",
-    "esbuild",
+    "swc",
     "runtime",
     "execution",
     "zero-config",
@@ -25,7 +25,7 @@
   ],
   "author": "ghostlexly@gmail.com",
   "license": "MIT",
-  "description": "⚡️ Lightning-fast TypeScript execution in Node.js with zero configuration required. Seamlessly run TypeScript files in both development and production environments using the power of esbuild.",
+  "description": "⚡️ Lightning-fast TypeScript execution in Node.js with zero configuration required. Full feature set of paths aliases, watch mode and more out of the box. Seamlessly run TypeScript files in both development and production environments using the power of swc.",
   "dependencies": {
     "@swc/core": "^1.10.7",
     "@types/node": "^22.10.2",
