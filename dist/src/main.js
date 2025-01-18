@@ -11,7 +11,7 @@ const glob_1 = require("glob");
 const typescript_1 = __importDefault(require("typescript"));
 const core_1 = require("@swc/core");
 const child_process_1 = require("child_process");
-const helper_1 = require("./helper");
+const logger_1 = require("./logger");
 const chokidar_1 = __importDefault(require("chokidar"));
 const chalk_1 = __importDefault(require("chalk"));
 class LtNode {
@@ -184,10 +184,10 @@ class LtNode {
     async runNodeJs({ entryPoint }) {
         const outputDir = await this.getOutputDir();
         const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
-        const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
         if (this.currentNodeProcess) {
             this.currentNodeProcess.kill();
         }
+        const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
         this.currentNodeProcess = (0, child_process_1.spawn)("node", [...execArgs, entryJs, ...scriptArgs], {
             stdio: "inherit",
             env: process.env,
@@ -210,8 +210,32 @@ class LtNode {
             });
         });
     }
+    async buildAndTypeCheck(entryPoint) {
+        try {
+            await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+            const runProcess = this.runNodeJs({ entryPoint });
+            if (process.env.TYPE_CHECK !== "false") {
+                setTimeout(() => {
+                    this.typeCheck().then((passed) => {
+                        if (!passed) {
+                            logger_1.logger.log({
+                                type: "error",
+                                message: "Type-check failed - see errors above.",
+                            });
+                        }
+                    });
+                }, 0);
+            }
+            await runProcess;
+        }
+        catch (error) {
+            logger_1.logger.log({
+                type: "error",
+                message: String(error),
+            });
+        }
+    }
     async watchFiles(entryPoint) {
-        const { fileNames } = this.parsedTsConfig;
         const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
         const outputDir = await this.getOutputDir();
         const watcher = chokidar_1.default.watch(rootDir, {
@@ -241,51 +265,28 @@ class LtNode {
             ignoreInitial: true,
         });
         watcher.on("change", async (filename) => {
-            helper_1.helper.log({
+            logger_1.logger.log({
                 type: "info",
                 message: `File changed: ${chalk_1.default.yellow(filename)}. Rebuilding...`,
             });
-            try {
-                await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
-                await this.runNodeJs({ entryPoint });
-                if (process.env.TYPE_CHECK !== "false") {
-                    const passed = await this.typeCheck();
-                    if (!passed) {
-                        console.error("Type-check failed - see errors above.");
-                    }
-                }
-            }
-            catch (error) {
-                console.error(String(error));
-            }
+            await this.buildAndTypeCheck(entryPoint);
         });
         process.on("SIGINT", () => {
             watcher.close();
+        });
+        logger_1.logger.log({
+            type: "info",
+            message: "Watching for file changes...",
         });
     }
     async run(entryPoint) {
         const { execArgs } = await this.getArgs({ entryPoint });
         this.isWatching = execArgs.includes("--watch");
         await this.parseTsConfig();
-        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
         if (this.isWatching) {
-            await this.watchFiles(entryPoint);
-            helper_1.helper.log({
-                type: "info",
-                message: "Watching for file changes...",
-            });
+            this.watchFiles(entryPoint);
         }
-        const runProcess = this.runNodeJs({ entryPoint });
-        if (process.env.TYPE_CHECK !== "false") {
-            setTimeout(() => {
-                this.typeCheck().then((passed) => {
-                    if (!passed) {
-                        console.error("Type-check failed - see errors above.");
-                    }
-                });
-            }, 0);
-        }
-        await runProcess;
+        await this.buildAndTypeCheck(entryPoint);
     }
 }
 exports.LtNode = LtNode;

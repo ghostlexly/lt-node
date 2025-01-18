@@ -5,7 +5,7 @@ import { glob } from "glob";
 import ts from "typescript";
 import { JscTarget, transformFile } from "@swc/core";
 import { spawn } from "child_process";
-import { helper } from "./helper";
+import { logger } from "./logger";
 import chokidar from "chokidar";
 import chalk from "chalk";
 
@@ -263,14 +263,13 @@ export class LtNode {
       path.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js")
     );
 
-    // Create a new Node.js process with the arguments
-    const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
-
-    // If we're already running a process in watch mode, kill it
+    // If we're already running a process in watch mode, clean up listeners and kill the process
     if (this.currentNodeProcess) {
       this.currentNodeProcess.kill();
     }
 
+    // Create a new Node.js process with the arguments
+    const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
     this.currentNodeProcess = spawn(
       "node",
       [...execArgs, entryJs, ...scriptArgs],
@@ -300,8 +299,39 @@ export class LtNode {
     });
   }
 
+  private async buildAndTypeCheck(entryPoint: string) {
+    try {
+      // Build project and copy files
+      await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+
+      // Run the Node.js process
+      const runProcess = this.runNodeJs({ entryPoint });
+
+      // Perform type checking if enabled
+      if (process.env.TYPE_CHECK !== "false") {
+        setTimeout(() => {
+          // Don't await this promise
+          this.typeCheck().then((passed) => {
+            if (!passed) {
+              logger.log({
+                type: "error",
+                message: "Type-check failed - see errors above.",
+              });
+            }
+          });
+        }, 0);
+      }
+
+      await runProcess;
+    } catch (error) {
+      logger.log({
+        type: "error",
+        message: String(error),
+      });
+    }
+  }
+
   private async watchFiles(entryPoint: string) {
-    const { fileNames } = this.parsedTsConfig;
     const rootDir = this.parsedTsConfig.options.rootDir ?? process.cwd();
     const outputDir = await this.getOutputDir();
 
@@ -344,30 +374,22 @@ export class LtNode {
     });
 
     watcher.on("change", async (filename) => {
-      helper.log({
+      logger.log({
         type: "info",
         message: `File changed: ${chalk.yellow(filename)}. Rebuilding...`,
       });
 
-      try {
-        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
-
-        await this.runNodeJs({ entryPoint });
-
-        if (process.env.TYPE_CHECK !== "false") {
-          const passed = await this.typeCheck();
-          if (!passed) {
-            console.error("Type-check failed - see errors above.");
-          }
-        }
-      } catch (error) {
-        console.error(String(error));
-      }
+      await this.buildAndTypeCheck(entryPoint);
     });
 
     // Clean up watcher on exit
     process.on("SIGINT", () => {
       watcher.close();
+    });
+
+    logger.log({
+      type: "info",
+      message: "Watching for file changes...",
     });
   }
 
@@ -384,33 +406,12 @@ export class LtNode {
     // Parse the tsconfig.json file
     await this.parseTsConfig();
 
-    // Build the project with SWC and copy non-ts files to the output dir
-    await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
-
-    // If we're in watch mode, start watching for file changes
+    // If we're in watch mode, start watcher for file changes
     if (this.isWatching) {
-      await this.watchFiles(entryPoint);
-      helper.log({
-        type: "info",
-        message: "Watching for file changes...",
-      });
+      this.watchFiles(entryPoint);
     }
 
-    // Start the Node.js process
-    const runProcess = this.runNodeJs({ entryPoint });
-
-    // Start type checking
-    if (process.env.TYPE_CHECK !== "false") {
-      setTimeout(() => {
-        this.typeCheck().then((passed) => {
-          if (!passed) {
-            console.error("Type-check failed - see errors above.");
-            // Only wait for the Node.js process to exit
-          }
-        });
-      }, 0);
-    }
-
-    await runProcess;
+    // build and type check
+    await this.buildAndTypeCheck(entryPoint);
   }
 }

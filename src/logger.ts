@@ -1,7 +1,6 @@
 import chalk from "chalk";
-import { spawn, SpawnOptions } from "child_process";
 
-class Helper {
+class Logger {
   log = ({
     message,
     type = "info",
@@ -21,4 +20,4 @@ class Helper {
   };
 }
 
-export const helper = new Helper();
+export const logger = new Logger();
