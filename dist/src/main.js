@@ -99,7 +99,7 @@ class LtNode {
         const rootDir = tsOptions.rootDir ?? process.cwd();
         const swcTarget = this.mapTarget(tsOptions.target ?? typescript_1.default.ScriptTarget.ES2022);
         const swcModule = this.mapModuleKind(tsOptions.module ?? typescript_1.default.ModuleKind.ESNext);
-        for (const tsFile of fileNames) {
+        await Promise.all(fileNames.map(async (tsFile) => {
             const relPath = path_1.default.relative(rootDir, tsFile);
             const outFile = path_1.default.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
             await promises_1.default.mkdir(path_1.default.dirname(outFile), { recursive: true });
@@ -121,11 +121,11 @@ class LtNode {
                 minify: false,
                 swcrc: false,
             });
-            await promises_1.default.writeFile(outFile, code, "utf8");
-            if (map) {
-                await promises_1.default.writeFile(outFile + ".map", map, "utf8");
-            }
-        }
+            return Promise.all([
+                promises_1.default.writeFile(outFile, code, "utf8"),
+                map ? promises_1.default.writeFile(outFile + ".map", map, "utf8") : Promise.resolve(),
+            ]);
+        }));
     }
     typeCheck() {
         return new Promise((resolve) => {
@@ -210,7 +210,7 @@ class LtNode {
             });
         });
     }
-    async buildAndTypeCheck(entryPoint) {
+    async buildAndRun(entryPoint) {
         try {
             await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
             const runProcess = this.runNodeJs({ entryPoint });
@@ -269,7 +269,7 @@ class LtNode {
                 type: "info",
                 message: `File changed: ${chalk_1.default.yellow(filename)}. Rebuilding...`,
             });
-            await this.buildAndTypeCheck(entryPoint);
+            await this.buildAndRun(entryPoint);
         });
         process.on("SIGINT", () => {
             watcher.close();
@@ -286,7 +286,7 @@ class LtNode {
         if (this.isWatching) {
             this.watchFiles(entryPoint);
         }
-        await this.buildAndTypeCheck(entryPoint);
+        await this.buildAndRun(entryPoint);
     }
 }
 exports.LtNode = LtNode;

@@ -119,7 +119,7 @@ export class LtNode {
     // If there's a rootDir set, we can replicate the relative path structure in outDir
     const rootDir = tsOptions.rootDir ?? process.cwd();
 
-    // Map TS options to SWC equivalents
+    // Map TS options to SWC equivalents once, outside the loop
     const swcTarget = this.mapTarget(
       tsOptions.target ?? ts.ScriptTarget.ES2022
     );
@@ -127,47 +127,48 @@ export class LtNode {
       tsOptions.module ?? ts.ModuleKind.ESNext
     );
 
-    // Transpile each file using SWC
-    for (const tsFile of fileNames) {
-      const relPath = path.relative(rootDir, tsFile);
-      const outFile = path.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
+    // Use Promise.all to parallelize file transformations
+    await Promise.all(
+      fileNames.map(async (tsFile) => {
+        const relPath = path.relative(rootDir, tsFile);
+        const outFile = path.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
 
-      // Ensure sub-folders exist
-      await fs.mkdir(path.dirname(outFile), { recursive: true });
+        // Ensure sub-folders exist
+        await fs.mkdir(path.dirname(outFile), { recursive: true });
 
-      const { code, map } = await transformFile(tsFile, {
-        jsc: {
-          parser: {
-            syntax: "typescript",
+        const { code, map } = await transformFile(tsFile, {
+          jsc: {
+            parser: {
+              syntax: "typescript",
 
-            // we can enable tsx if needed:
-            tsx: false,
+              // we can enable tsx if needed:
+              tsx: false,
 
-            // enable if you use experimental decorators:
-            decorators: !!tsOptions.experimentalDecorators,
+              // enable if you use experimental decorators:
+              decorators: !!tsOptions.experimentalDecorators,
+            },
+            target: swcTarget,
+
+            baseUrl: tsOptions.baseUrl,
+            paths: tsOptions.paths,
           },
-          target: swcTarget,
 
-          baseUrl: tsOptions.baseUrl,
-          paths: tsOptions.paths,
-        },
+          module: {
+            type: swcModule,
+          },
 
-        module: {
-          type: swcModule,
-        },
+          sourceMaps: true,
+          minify: false,
+          swcrc: false,
+        });
 
-        sourceMaps: true,
-        minify: false,
-        swcrc: false,
-      });
-
-      // Write the output and source map
-      await fs.writeFile(outFile, code, "utf8");
-
-      if (map) {
-        await fs.writeFile(outFile + ".map", map, "utf8");
-      }
-    }
+        // Write code and source map files in parallel
+        return Promise.all([
+          fs.writeFile(outFile, code, "utf8"),
+          map ? fs.writeFile(outFile + ".map", map, "utf8") : Promise.resolve(),
+        ]);
+      })
+    );
   }
 
   /**
