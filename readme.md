@@ -1,52 +1,66 @@
-## lt-node vs Other TypeScript Runtime Solutions
+# ⚡️ LT-Node ⚡️
 
-| Feature                         | lt-node                 | ts-node            | tsx                         | ts-node-dev        | bun                               |
-| ------------------------------- | ----------------------- | ------------------ | --------------------------- | ------------------ | --------------------------------- |
-| **Compilation Speed**           | ⚡️ **Fast** (uses SWC) | 🐌 Slow (uses tsc) | ⚡️ **Fast** (uses esbuild) | 🐌 Slow (uses tsc) | ⚡️ **Very Fast** (custom engine) |
-| **Type Checking**               | ✅ **Parallel**         | ✅ Yes             | ❌ No                       | ✅ Yes             | ❌ No                             |
-| **Can i run in production?**    | ✅ **Yes**              | ❌ Not recommended | ❌ Not recommended          | ❌ Not recommended | ✅ Yes                            |
-| **Run Same Code in Prod & Dev** | ✅ **Yes**              | ❌ No              | ❌ No                       | ❌ No              | ❌ No                             |
-| **Paths Aliases Support\***     | ✅ **Yes**              | ❌ No              | ❌ No                       | ❌ No              | ❌ No                             |
-| **Copy Non-TS Files**           | ✅ **Yes**              | ❌ No              | ❌ No                       | ❌ No              | ❌ No                             |
-| **Watch Mode**                  | ✅ **Yes**              | ❌ No              | ✅ Yes                      | ✅ Yes             | ✅ Yes                            |
-| **HMR Support**                 | ✅ **Yes**              | ❌ No              | ❌ No                       | ✅ Yes             | ✅ Yes                            |
-| **Decorators Support**          | ✅ **Yes**              | ❌ No              | ❌ No                       | ✅ Yes             | ✅ Yes                            |
-| **Node.js Compatibility**       | ✅ **100%**             | ✅ 100%            | ✅ 100%                     | ✅ 100%            | ⚠️ Partial                        |
-| **npm Ecosystem Compatibility** | ✅ **100%**             | ✅ 100%            | ✅ 100%                     | ✅ 100%            | ⚠️ Partial                        |
-| **tsconfig.json Support**       | ✅ **Full**             | ✅ Full            | ⚠️ Partial                  | ✅ Full            | ⚠️ Partial                        |
-| **Source Maps**                 | ✅ **Yes**              | ✅ Yes             | ✅ Yes                      | ✅ Yes             | ✅ Yes                            |
-| **Non-TS Files Support**        | ✅ **Yes**              | ✅ Yes             | ✅ Yes                      | ✅ Yes             | ✅ Yes                            |
+> **LT-Node** _(lightning-node)_ is a robust Node.js tool that seamlessly integrates TypeScript into both development and production environments. It offers all the TypeScript features you love, right out of the box, with no additional configuration required.
 
-_Paths Aliases Support_: Enables loading of modules specified in the `paths` section of `tsconfig.json` or `jsconfig.json`, both at runtime and through the API.
+## Table of Contents
 
-_Non-TS Files Support_: Automatically copies non-TypeScript files to the output directory, ensuring access to all files in the production build as during development, without requiring additional configuration, plugins, or scripts.
+- [Installation](#installation)
+- [Usage](#usage)
+- [Comparison with Other TypeScript Runtimes](#comparison-with-other-typescript-runtimes)
+- [Why Choose LT-Node](#why-choose-lt-node)
 
-## Key Differentiators
+## Installation
 
-- **lt-node**: Experience the power of `lt-node`, combining ultra-fast compilation with SWC and parallel type checking. Enjoy unmatched speed and optimal type safety, all without extra configuration. With `lt-node`, you get the best of TypeScript right out of the box.
+Install LT-Node globally using npm:
 
-- **ts-node**: A traditional solution, reliable but slower due to TypeScript compilation. Requires additional configuration to get paths aliases, watch mode, or HMR with additional dependencies. Not recommended for production.
+```bash
+npm install -g lt-node
+```
 
-- **tsx**: Focused on speed with esbuild, but at the cost of type checking.
+## Usage
 
-- **ts-node-dev**: Adds watch mode and HMR to ts-node, ideal for development.
+LT-Node is a CLI tool designed to run TypeScript files in Node.js, serving as a faster alternative to ts-node. It supports both development and production environments seamlessly.
 
-- **bun**: An all-in-one JavaScript runtime with built-in TypeScript support, very fast but with some compatibility trade-offs.
+- **Automatic Configuration**: Reads your `tsconfig.json` if available, or defaults to standard settings.
+- **Static File Handling**: Automatically copies static files to the output directory for easy access in all environments.
 
-## When to Choose lt-node
+To execute a TypeScript file, use:
 
-- **Unlock Your Potential**: With `lt-node`, enjoy all the best features without extra configuration, additional dependencies, and for free.
+```bash
+lt-node src/main.ts
+```
 
-- **Simplify Your Process**: Streamline your build process and development workflow with `lt-node`.
+## Comparison with Other TypeScript Runtimes
 
-- **Unify Your Environments**: Run the same code in production and development without hassle.
+| Feature                                         | LT-Node                 | ts-node            | tsx                         | ts-node-dev        | bun                               |
+| ----------------------------------------------- | ----------------------- | ------------------ | --------------------------- | ------------------ | --------------------------------- |
+| **Compilation Speed**                           | ⚡️ **Fast** (uses SWC) | 🐌 Slow (uses tsc) | ⚡️ **Fast** (uses esbuild) | 🐌 Slow (uses tsc) | ⚡️ **Very Fast** (custom engine) |
+| **Type Checking**                               | ✅ **Parallel**         | ✅ Yes             | ❌ No                       | ✅ Yes             | ❌ No                             |
+| **Run in Production Server**                    | ✅ **Yes**              | ❌ Not recommended | ❌ Not recommended          | ❌ Not recommended | ✅ Yes                            |
+| **Run Same Code in Development and Production** | ✅ **Yes**              | ❌ No              | ❌ No                       | ❌ No              | ✅ Yes                            |
+| **Path Aliases Support\***                      | ✅ **Yes**              | ❌ No              | ❌ No                       | ❌ No              | ❌ No                             |
+| **Static File Support**                         | ✅ **Yes**              | ❌ No              | ❌ No                       | ❌ No              | ❌ No                             |
+| **Watch Mode**                                  | ✅ **Yes**              | ❌ No              | ✅ Yes                      | ✅ Yes             | ✅ Yes                            |
+| **HMR Support**                                 | ✅ **Yes**              | ❌ No              | ❌ No                       | ✅ Yes             | ✅ Yes                            |
+| **Decorators Support**                          | ✅ **Yes**              | ❌ No              | ❌ No                       | ✅ Yes             | ✅ Yes                            |
+| **Node.js Compatibility**                       | ✅ **100%**             | ✅ 100%            | ✅ 100%                     | ✅ 100%            | ⚠️ Partial                        |
+| **npm Ecosystem Compatibility**                 | ✅ **100%**             | ✅ 100%            | ✅ 100%                     | ✅ 100%            | ⚠️ Partial                        |
+| **tsconfig.json Support**                       | ✅ **Full**             | ✅ Full            | ⚠️ Partial                  | ✅ Full            | ⚠️ Partial                        |
+| **Source Maps**                                 | ✅ **Yes**              | ✅ Yes             | ✅ Yes                      | ✅ Yes             | ✅ Yes                            |
+| **Non-TS Files Support**                        | ✅ **Yes**              | ✅ Yes             | ✅ Yes                      | ✅ Yes             | ✅ Yes                            |
 
-- **Accelerate Your Execution**: Benefit from fast execution with type checking, without compromise.
+_Path Aliases Support_: Enables loading of modules specified in the `paths` section of `tsconfig.json` or `jsconfig.json`, both at runtime and through the API.
 
-- **Full tsconfig.json Support**: Enjoy complete compatibility with your TypeScript configuration.
+_Static File Support_: Automatically copies non-TypeScript files to the output directory, ensuring access to all files in the production build as during development, without requiring additional configuration, plugins, or scripts.
 
-- **Parallel Type Checking**: Prefer type checking that doesn't block execution, for maximum productivity.
+## Why Choose LT-Node
 
-- **Complete Node.js Compatibility**: Ensure 100% compatibility with Node.js, for seamless integration.
+- **Effortless Setup**: Enjoy all the best features without extra configuration or dependencies.
+- **Streamlined Workflow**: Simplify your build process and development workflow.
+- **Consistent Environments**: Run the same code in both production and development.
+- **Fast Execution**: Benefit from rapid execution with parallel type checking.
+- **Full tsconfig.json Support**: Complete compatibility with your TypeScript configuration.
+- **Parallel Type Checking**: Maximize productivity with non-blocking type checking.
+- **Complete Node.js Compatibility**: Ensure seamless integration with Node.js.
 
-Adopt `lt-node` today and transform your TypeScript development experience!
+Adopt **LT-Node** today and transform your TypeScript development experience!
