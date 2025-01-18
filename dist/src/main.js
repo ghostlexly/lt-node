@@ -7,55 +7,205 @@ exports.LtNode = void 0;
 const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
 const fs_1 = require("fs");
+const glob_1 = require("glob");
 const typescript_1 = __importDefault(require("typescript"));
+const core_1 = require("@swc/core");
+const child_process_1 = require("child_process");
+const helper_1 = require("./helper");
 class LtNode {
-    outputDir;
-    tempDir;
-    sourceDir;
-    constructor(options = {}) {
-        this.sourceDir = process.cwd();
+    tsconfigPath;
+    parsedTsConfig;
+    constructor(tsconfigPath = path_1.default.join(process.cwd(), "tsconfig.json")) {
+        this.tsconfigPath = tsconfigPath;
     }
-    getOutputDir = async () => {
-        if (this.outputDir) {
-            return this.outputDir;
+    async parseTsConfig() {
+        const parsedCommandLine = typescript_1.default.getParsedCommandLineOfConfigFile(this.tsconfigPath, {}, {
+            ...typescript_1.default.sys,
+            onUnRecoverableConfigFileDiagnostic: (diag) => {
+                throw new Error(typescript_1.default.flattenDiagnosticMessageText(diag.messageText, "\n"));
+            },
+        });
+        if (!parsedCommandLine) {
+            throw new Error(`Failed to parse ${this.tsconfigPath}`);
         }
-        const outputDir = path_1.default.join(this.sourceDir, ".ts-cache");
-        if (!(0, fs_1.existsSync)(outputDir)) {
-            await promises_1.default.mkdir(outputDir, { recursive: true });
+        this.parsedTsConfig = parsedCommandLine;
+        return parsedCommandLine;
+    }
+    async getOutputDir() {
+        const { options: tsOptions } = this.parsedTsConfig;
+        const outDir = tsOptions.outDir
+            ? path_1.default.resolve(tsOptions.outDir)
+            : path_1.default.join(process.cwd(), "dist");
+        if (!(0, fs_1.existsSync)(outDir)) {
+            await promises_1.default.mkdir(outDir, { recursive: true });
         }
-        this.outputDir = outputDir;
-        return outputDir;
-    };
-    buildProject = async () => {
-        try {
-            const configPath = path_1.default.join(process.cwd(), "tsconfig.json");
-            const parsedCommandLine = typescript_1.default.getParsedCommandLineOfConfigFile(configPath, {}, {
-                ...typescript_1.default.sys,
-                onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
-                    throw new Error(typescript_1.default.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+        return outDir;
+    }
+    mapTarget(tsTarget) {
+        switch (tsTarget) {
+            case typescript_1.default.ScriptTarget.ES5:
+                return "es5";
+            case typescript_1.default.ScriptTarget.ES2015:
+                return "es2015";
+            case typescript_1.default.ScriptTarget.ES2016:
+                return "es2016";
+            case typescript_1.default.ScriptTarget.ES2017:
+                return "es2017";
+            case typescript_1.default.ScriptTarget.ES2018:
+                return "es2018";
+            case typescript_1.default.ScriptTarget.ES2019:
+                return "es2019";
+            case typescript_1.default.ScriptTarget.ES2020:
+                return "es2020";
+            case typescript_1.default.ScriptTarget.ES2021:
+                return "es2021";
+            case typescript_1.default.ScriptTarget.ES2022:
+                return "es2022";
+            default:
+                return "es2022";
+        }
+    }
+    mapModuleKind(tsModuleKind) {
+        switch (tsModuleKind) {
+            case typescript_1.default.ModuleKind.CommonJS:
+                return "commonjs";
+            default:
+                return "es6";
+        }
+    }
+    async buildProjectWithSwc() {
+        const { options: tsOptions, fileNames } = this.parsedTsConfig;
+        const outputDir = await this.getOutputDir();
+        const rootDir = tsOptions.rootDir ?? process.cwd();
+        const swcTarget = this.mapTarget(tsOptions.target ?? typescript_1.default.ScriptTarget.ES2022);
+        const swcModule = this.mapModuleKind(tsOptions.module ?? typescript_1.default.ModuleKind.ESNext);
+        for (const tsFile of fileNames) {
+            const relPath = path_1.default.relative(rootDir, tsFile);
+            const outFile = path_1.default.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
+            await promises_1.default.mkdir(path_1.default.dirname(outFile), { recursive: true });
+            const { code, map } = await (0, core_1.transformFile)(tsFile, {
+                jsc: {
+                    parser: {
+                        syntax: "typescript",
+                        tsx: false,
+                        decorators: !!tsOptions.experimentalDecorators,
+                    },
+                    target: swcTarget,
+                    baseUrl: tsOptions.baseUrl,
+                    paths: tsOptions.paths,
                 },
+                module: {
+                    type: swcModule,
+                },
+                sourceMaps: true,
+                minify: false,
+                swcrc: false,
             });
-            if (!parsedCommandLine) {
-                throw new Error(`Failed to parse tsconfig at ${configPath}`);
+            await promises_1.default.writeFile(outFile, code, "utf8");
+            if (map) {
+                await promises_1.default.writeFile(outFile + ".map", map, "utf8");
             }
-            const outputDir = parsedCommandLine.options.outDir;
-            const programNoTypes = typescript_1.default.createProgram(parsedCommandLine.fileNames, {
-                ...parsedCommandLine.options,
-                noEmit: false,
-                emitDeclarationOnly: false,
-                noEmitOnError: false,
-                skipLibCheck: true,
-                incremental: true,
-                noCheck: true,
+        }
+    }
+    typeCheck() {
+        return new Promise((resolve) => {
+            const program = typescript_1.default.createProgram({
+                rootNames: this.parsedTsConfig.fileNames,
+                options: this.parsedTsConfig.options,
             });
-            programNoTypes.emit();
+            const diagnostics = [
+                ...program.getSemanticDiagnostics(),
+                ...program.getSyntacticDiagnostics(),
+            ];
+            if (diagnostics.length > 0) {
+                const formatHost = {
+                    getCanonicalFileName: (path) => path,
+                    getCurrentDirectory: typescript_1.default.sys.getCurrentDirectory,
+                    getNewLine: () => typescript_1.default.sys.newLine,
+                };
+                const output = typescript_1.default.formatDiagnosticsWithColorAndContext(diagnostics, formatHost);
+                process.stderr.write(output);
+                resolve(false);
+            }
+            resolve(true);
+        });
+    }
+    async copyNonTsFiles() {
+        const { options: tsOptions } = this.parsedTsConfig;
+        const outputDir = await this.getOutputDir();
+        const rootDir = tsOptions.rootDir ?? process.cwd();
+        const nonTsFiles = await (0, glob_1.glob)("**/*", {
+            ignore: ["**/*.{ts,tsx,js,jsx}", "**/node_modules/**", outputDir + "/**"],
+            nodir: true,
+            cwd: rootDir,
+        });
+        for (const file of nonTsFiles) {
+            const sourcePath = path_1.default.join(rootDir, file);
+            const destPath = path_1.default.join(outputDir, file);
+            await promises_1.default.mkdir(path_1.default.dirname(destPath), { recursive: true });
+            await promises_1.default.copyFile(sourcePath, destPath);
         }
-        catch (error) {
-            throw error;
-        }
-    };
+    }
+    async getArgs({ entryPoint }) {
+        const entryPointIndex = process.argv.indexOf(entryPoint);
+        const allArgs = process.argv.slice(entryPointIndex + 1);
+        const execArgs = [];
+        const scriptArgs = [];
+        allArgs.forEach((arg) => {
+            if (arg.startsWith("--")) {
+                execArgs.push(arg);
+            }
+            else {
+                scriptArgs.push(arg);
+            }
+        });
+        return { execArgs, scriptArgs };
+    }
+    async runNodeJs({ entryPoint }) {
+        const outputDir = await this.getOutputDir();
+        const entryJs = path_1.default.join(outputDir, path_1.default.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js"));
+        const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
+        const nodeProcess = (0, child_process_1.spawn)("node", [...execArgs, entryJs, ...scriptArgs], {
+            stdio: "inherit",
+            env: process.env,
+        });
+        return new Promise((resolve, reject) => {
+            nodeProcess.on("exit", (code) => {
+                if (code === 0 || code === null) {
+                    resolve(true);
+                }
+                else {
+                    reject(new Error(`Process exited with code ${code}`));
+                }
+            });
+            nodeProcess.on("error", (err) => {
+                reject(err);
+            });
+            process.on("SIGINT", () => {
+                nodeProcess.kill();
+            });
+            process.on("exit", () => {
+                nodeProcess.kill();
+            });
+        });
+    }
     async run(entryPoint) {
-        await this.buildProject();
+        await this.parseTsConfig();
+        await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+        const runProcess = this.runNodeJs({ entryPoint });
+        if (process.env.TYPE_CHECK !== "false") {
+            setTimeout(() => {
+                this.typeCheck().then((passed) => {
+                    if (!passed) {
+                        helper_1.helper.log({
+                            type: "error",
+                            message: "Type-check failed - see errors above.",
+                        });
+                    }
+                });
+            }, 0);
+        }
+        await runProcess;
     }
 }
 exports.LtNode = LtNode;

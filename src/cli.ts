@@ -3,7 +3,6 @@
 import { LtNode } from "./main";
 
 async function main() {
-  const bootstrapTime = performance.now();
   const filename = process.argv[2];
 
   if (!filename) {
@@ -14,9 +13,6 @@ async function main() {
 
   const runner = new LtNode();
   await runner.run(filename);
-
-  const buildTime = performance.now() - bootstrapTime;
-  console.log(`Build time: ${buildTime.toFixed(2)}ms`);
 }
 
 main().catch((error) => {

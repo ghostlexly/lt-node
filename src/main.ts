@@ -1,84 +1,306 @@
 import path from "path";
 import fs from "fs/promises";
 import { existsSync } from "fs";
+import { glob } from "glob";
 import ts from "typescript";
-import tmp from "tmp";
+import { JscTarget, transformFile } from "@swc/core";
+import { spawn } from "child_process";
+import { helper } from "./helper";
 
 export class LtNode {
-  private outputDir: string;
-  private tempDir: string;
-  private sourceDir: string;
+  private tsconfigPath: string;
+  private parsedTsConfig: ts.ParsedCommandLine;
 
-  constructor(options = {}) {
-    this.sourceDir = process.cwd();
+  constructor(tsconfigPath = path.join(process.cwd(), "tsconfig.json")) {
+    this.tsconfigPath = tsconfigPath;
   }
 
-  private getOutputDir = async () => {
-    // If output dir is already set, return it
-    if (this.outputDir) {
-      return this.outputDir;
-    }
-
-    // If output dir is not set, create it and set it
-    const outputDir = path.join(this.sourceDir, ".ts-cache");
-
-    if (!existsSync(outputDir)) {
-      await fs.mkdir(outputDir, { recursive: true });
-    }
-
-    this.outputDir = outputDir;
-
-    return outputDir;
-  };
-
-  private buildProject = async () => {
-    try {
-      const configPath = path.join(process.cwd(), "tsconfig.json");
-
-      const parsedCommandLine = ts.getParsedCommandLineOfConfigFile(
-        configPath,
-        {},
-        {
-          ...ts.sys,
-          onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
-            throw new Error(
-              ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
-            );
-          },
-        }
-      );
-
-      if (!parsedCommandLine) {
-        throw new Error(`Failed to parse tsconfig at ${configPath}`);
+  private async parseTsConfig() {
+    // This method calls TS's higher-level API to parse the config
+    const parsedCommandLine = ts.getParsedCommandLineOfConfigFile(
+      this.tsconfigPath,
+      /* configOverrides */ {},
+      {
+        ...ts.sys,
+        onUnRecoverableConfigFileDiagnostic: (diag) => {
+          throw new Error(
+            ts.flattenDiagnosticMessageText(diag.messageText, "\n")
+          );
+        },
       }
+    );
 
-      const outputDir = parsedCommandLine.options.outDir;
+    if (!parsedCommandLine) {
+      throw new Error(`Failed to parse ${this.tsconfigPath}`);
+    }
 
-      // Second run with type checking disabled
-      const programNoTypes = ts.createProgram(parsedCommandLine.fileNames, {
-        ...parsedCommandLine.options,
-        noEmit: false,
-        emitDeclarationOnly: false,
-        noEmitOnError: false,
-        incremental: true,
-        noCheck: true, // Disable type checking
-        skipLibCheck: true,
-        composite: true,
+    // Set the parsedTsConfig variable
+    this.parsedTsConfig = parsedCommandLine;
+
+    return parsedCommandLine;
+  }
+
+  private async getOutputDir() {
+    const { options: tsOptions } = this.parsedTsConfig;
+
+    const outDir = tsOptions.outDir
+      ? path.resolve(tsOptions.outDir)
+      : path.join(process.cwd(), "dist");
+
+    if (!existsSync(outDir)) {
+      await fs.mkdir(outDir, { recursive: true });
+    }
+
+    return outDir;
+  }
+
+  private mapTarget(tsTarget: ts.ScriptTarget): JscTarget {
+    switch (tsTarget) {
+      case ts.ScriptTarget.ES5:
+        return "es5";
+      case ts.ScriptTarget.ES2015:
+        return "es2015";
+      case ts.ScriptTarget.ES2016:
+        return "es2016";
+      case ts.ScriptTarget.ES2017:
+        return "es2017";
+      case ts.ScriptTarget.ES2018:
+        return "es2018";
+      case ts.ScriptTarget.ES2019:
+        return "es2019";
+      case ts.ScriptTarget.ES2020:
+        return "es2020";
+      case ts.ScriptTarget.ES2021:
+        return "es2021";
+      case ts.ScriptTarget.ES2022:
+        return "es2022";
+      default:
+        return "es2022";
+    }
+  }
+
+  private mapModuleKind(tsModuleKind: ts.ModuleKind): "commonjs" | "es6" {
+    switch (tsModuleKind) {
+      case ts.ModuleKind.CommonJS:
+        return "commonjs";
+      // For ESNext, ES2015, ES2020, etc., treat them as ESM ("es6") in SWC's nomenclature.
+      default:
+        return "es6";
+    }
+  }
+
+  private async buildProjectWithSwc() {
+    // Get the file names and options from the parsed tsconfig and find the output dir
+    const { options: tsOptions, fileNames } = this.parsedTsConfig;
+    const outputDir = await this.getOutputDir();
+
+    // If there's a rootDir set, we can replicate the relative path structure in outDir
+    const rootDir = tsOptions.rootDir ?? process.cwd();
+
+    // Map TS options to SWC equivalents
+    const swcTarget = this.mapTarget(
+      tsOptions.target ?? ts.ScriptTarget.ES2022
+    );
+    const swcModule = this.mapModuleKind(
+      tsOptions.module ?? ts.ModuleKind.ESNext
+    );
+
+    // Transpile each file using SWC
+    for (const tsFile of fileNames) {
+      const relPath = path.relative(rootDir, tsFile);
+      const outFile = path.join(outputDir, relPath.replace(/\.tsx?$/, ".js"));
+
+      // Ensure sub-folders exist
+      await fs.mkdir(path.dirname(outFile), { recursive: true });
+
+      const { code, map } = await transformFile(tsFile, {
+        jsc: {
+          parser: {
+            syntax: "typescript",
+
+            // we can enable tsx if needed:
+            tsx: false,
+
+            // enable if you use experimental decorators:
+            decorators: !!tsOptions.experimentalDecorators,
+          },
+          target: swcTarget,
+
+          baseUrl: tsOptions.baseUrl,
+          paths: tsOptions.paths,
+        },
+
+        module: {
+          type: swcModule,
+        },
+
+        sourceMaps: true,
+        minify: false,
+        swcrc: false,
       });
 
-      // Emit the compiled files
-      programNoTypes.emit();
-    } catch (error) {
-      throw error;
+      // Write the output and source map
+      await fs.writeFile(outFile, code, "utf8");
+
+      if (map) {
+        await fs.writeFile(outFile + ".map", map, "utf8");
+      }
     }
-  };
+  }
 
+  /**
+   * Type-check the codebase using TypeScript compiler API
+   */
+  private typeCheck(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const program = ts.createProgram({
+        rootNames: this.parsedTsConfig.fileNames,
+        options: this.parsedTsConfig.options,
+      });
+
+      const diagnostics = [
+        ...program.getSemanticDiagnostics(),
+        ...program.getSyntacticDiagnostics(),
+      ];
+
+      if (diagnostics.length > 0) {
+        // Use TypeScript's built-in formatter
+        const formatHost: ts.FormatDiagnosticsHost = {
+          getCanonicalFileName: (path) => path,
+          getCurrentDirectory: ts.sys.getCurrentDirectory,
+          getNewLine: () => ts.sys.newLine,
+        };
+
+        const output = ts.formatDiagnosticsWithColorAndContext(
+          diagnostics,
+          formatHost
+        );
+        process.stderr.write(output);
+        resolve(false);
+      }
+
+      resolve(true);
+    });
+  }
+
+  public async copyNonTsFiles() {
+    const { options: tsOptions } = this.parsedTsConfig;
+    const outputDir = await this.getOutputDir();
+    const rootDir = tsOptions.rootDir ?? process.cwd();
+
+    const nonTsFiles = await glob("**/*", {
+      ignore: ["**/*.{ts,tsx,js,jsx}", "**/node_modules/**", outputDir + "/**"],
+      nodir: true,
+      cwd: rootDir,
+    });
+
+    for (const file of nonTsFiles) {
+      const sourcePath = path.join(rootDir, file);
+      const destPath = path.join(outputDir, file);
+
+      // Ensure the destination directory exists
+      await fs.mkdir(path.dirname(destPath), { recursive: true });
+
+      // Copy the file
+      await fs.copyFile(sourcePath, destPath);
+    }
+  }
+
+  /**
+   * Get the arguments and separate node args from script args, so we can pass them to the child process.
+   */
+  private async getArgs({ entryPoint }: { entryPoint: string }) {
+    // Get the arguments and separate node args from script args
+    const entryPointIndex = process.argv.indexOf(entryPoint);
+    const allArgs = process.argv.slice(entryPointIndex + 1);
+
+    // Separate Node.js args (starting with --) from script args
+    const execArgs: string[] = [];
+    const scriptArgs: string[] = [];
+
+    allArgs.forEach((arg) => {
+      if (arg.startsWith("--")) {
+        execArgs.push(arg);
+      } else {
+        scriptArgs.push(arg);
+      }
+    });
+
+    return { execArgs, scriptArgs };
+  }
+
+  /**
+   * Run the transpiled entry point with a new Node.js process.
+   */
+  private async runNodeJs({ entryPoint }: { entryPoint: string }) {
+    // Get the output directory and resolve the transpiled entry point path
+    const outputDir = await this.getOutputDir();
+
+    const entryJs = path.join(
+      outputDir,
+      path.relative(process.cwd(), entryPoint).replace(/\.tsx?$/, ".js")
+    );
+
+    // Create a new Node.js process with the arguments
+    const { execArgs, scriptArgs } = await this.getArgs({ entryPoint });
+
+    const nodeProcess = spawn("node", [...execArgs, entryJs, ...scriptArgs], {
+      stdio: "inherit",
+      env: process.env,
+    });
+
+    // Handle the process exit
+    return new Promise((resolve, reject) => {
+      nodeProcess.on("exit", (code) => {
+        if (code === 0 || code === null) {
+          resolve(true);
+        } else {
+          reject(new Error(`Process exited with code ${code}`));
+        }
+      });
+
+      nodeProcess.on("error", (err) => {
+        reject(err);
+      });
+
+      // Handle the SIGINT signal (Ctrl+C) to stop the child process before exiting
+      process.on("SIGINT", () => {
+        nodeProcess.kill();
+      });
+      process.on("exit", () => {
+        nodeProcess.kill();
+      });
+    });
+  }
+
+  /**
+   * The main entry point for the application.
+   */
   public async run(entryPoint: string): Promise<void> {
-    await this.buildProject();
+    await this.parseTsConfig();
 
-    // const relativePath = path.relative(
-    //   this.sourceDir,
-    //   path.resolve(entryPoint)
-    // );
+    // Build the project with SWC and copy non-ts files to the output dir
+    await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
+
+    // Start the Node.js process
+    const runProcess = this.runNodeJs({ entryPoint });
+
+    // Start type checking immediately without awaiting
+    if (process.env.TYPE_CHECK !== "false") {
+      setTimeout(() => {
+        // Don't await this promise
+        this.typeCheck().then((passed) => {
+          if (!passed) {
+            helper.log({
+              type: "error",
+              message: "Type-check failed - see errors above.",
+            });
+          }
+        });
+      }, 0);
+    }
+
+    // Only wait for the Node.js process to exit
+    await runProcess;
   }
 }
