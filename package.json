@@ -28,12 +28,10 @@
   "description": "⚡️ Lightning-fast TypeScript execution in Node.js with zero configuration required. Full feature set of paths aliases, watch mode and more out of the box. Seamlessly run TypeScript files in both development and production environments using the power of swc.",
   "dependencies": {
     "@swc/core": "^1.10.7",
-    "@types/node": "^22.10.2",
     "chalk": "^4.1.2",
     "chokidar": "^4.0.3",
     "debug": "^4.4.0",
     "glob": "^11.0.1",
-    "tmp": "^0.2.3",
     "typescript": "^5.7.3"
   },
   "devDependencies": {
