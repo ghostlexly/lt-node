@@ -1,5 +1,7 @@
 # ⚡️ LT-Node ⚡️
 
+## Bringing Simplicity to TypeScript
+
 > **LT-Node** _(lightning-node)_ is a robust Node.js tool that seamlessly integrates TypeScript into both development and production environments. It offers all the TypeScript features you love, right out of the box, with no additional configuration required.
 
 ## Table of Contents
