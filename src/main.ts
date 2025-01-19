@@ -321,40 +321,44 @@ export class LtNode {
     }
 
     // Handle the process exit
-    return new Promise((resolve, reject) => {
-      this.debug("runNodeJs - spawning new node process");
+    this.debug("runNodeJs - spawning new node process");
 
-      // Create a new Node.js process with the arguments
-      const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
+    // Create a new Node.js process with the arguments
+    const { execArgs, scriptArgs } = this.getArgs({ entryPoint });
 
-      // Filter out lt-node args from execArgs
-      const filteredExecArgs = execArgs.filter(
-        (arg) => arg !== "--watch" && arg !== "--noCheck"
-      );
+    // Filter out lt-node args from execArgs
+    const filteredExecArgs = execArgs.filter(
+      (arg) => arg !== "--watch" && arg !== "--noCheck"
+    );
 
-      this.currentNodeProcess = spawn(
-        "node",
-        [...filteredExecArgs, entryJs, ...scriptArgs],
-        {
-          stdio: "inherit",
-          env: process.env,
-        }
-      );
-
-      if (!this.isWatching) {
-        this.currentNodeProcess.on("exit", (code) => {
-          if (code === 0 || code === null) {
-            resolve(true);
-          } else {
-            reject(new Error(`Process exited with code ${code}`));
-          }
-        });
-
-        this.currentNodeProcess.on("error", (err) => {
-          reject(err);
-        });
+    this.currentNodeProcess = spawn(
+      "node",
+      [...filteredExecArgs, entryJs, ...scriptArgs],
+      {
+        stdio: "inherit",
+        env: process.env,
       }
-    });
+    );
+
+    if (!this.isWatching) {
+      this.currentNodeProcess.on("exit", (code) => {
+        if (code === 0 || code === null) {
+          this.debug("runNodeJs - node process exited with code 0");
+        } else {
+          logger.log({
+            type: "error",
+            message: `NodeJS process exited with code: ${code}`,
+          });
+        }
+      });
+
+      this.currentNodeProcess.on("error", (err) => {
+        logger.log({
+          type: "error",
+          message: `NodeJS process exited with the error: ${err}`,
+        });
+      });
+    }
   };
 
   /**
@@ -366,25 +370,21 @@ export class LtNode {
       await Promise.all([this.copyNonTsFiles(), this.buildProjectWithSwc()]);
 
       // Run the Node.js process
-      const runProcess = this.runNodeJs({ entryPoint });
+      await this.runNodeJs({ entryPoint });
 
       // Perform type checking if enabled
       if (!this.isNoCheck) {
-        setTimeout(() => {
-          // Don't await this promise
-          this.typeCheck().then((passed) => {
-            if (!passed) {
-              logger.log({
-                type: "error",
-                message:
-                  "Type-check failed, see errors above - Your code is still running.",
-              });
-            }
-          });
-        }, 0);
+        // Don't await this promise
+        await this.typeCheck().then((passed) => {
+          if (!passed) {
+            logger.log({
+              type: "error",
+              message:
+                "Type-check failed, see errors above - Your code is still running.",
+            });
+          }
+        });
       }
-
-      await runProcess;
     } catch (error) {
       logger.log({
         type: "error",
