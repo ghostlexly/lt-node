@@ -2,7 +2,7 @@
 
 ## Bringing Simplicity to TypeScript
 
-> **LT-Node** _(lightning-node)_ is a robust Node.js tool that seamlessly integrates TypeScript into both development and production environments. It offers all the TypeScript features you love, right out of the box, with no additional configuration required.
+> **LT-Node** _(lightning-node)_ is a robust Node.js tool that provides effortless TypeScript support in both development and production environments. It offers all the TypeScript features you love, right out of the box, with no additional configuration required.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ npm install -g lt-node
 
 ## Usage
 
-LT-Node is a CLI tool designed to run TypeScript files in Node.js, serving as a faster alternative to ts-node. It supports both development and production environments seamlessly.
+LT-Node is a CLI tool designed to run TypeScript files in Node.js, serving as a faster alternative to ts-node. It supports both development and production environments.
 
 - **Automatic Configuration**: Reads your `tsconfig.json` if available, or defaults to standard settings.
 - **Static File Handling**: Automatically copies static files to the output directory for easy access in all environments.
@@ -69,5 +69,7 @@ _Static File Support_: Automatically copies non-TypeScript files to the output d
 - **Full tsconfig.json Support**: Complete compatibility with your TypeScript configuration.
 - **Parallel Type Checking**: Maximize productivity with non-blocking type checking.
 - **Complete Node.js Compatibility**: Ensure seamless integration with Node.js.
+- **Static File Support**: Automatically copies non-TypeScript files to the output directory, ensuring access to all files in the production build as during development, without requiring additional configuration, plugins, or scripts.
+- **Watch Mode**: Automatically recompiles and reruns the TypeScript files when you make changes.
 
 Adopt **LT-Node** today and transform your TypeScript development experience!
